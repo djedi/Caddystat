@@ -420,11 +420,13 @@ func (g *GeoLookup) Lookup(ip string) (string, string, string) {
 }
 
 type caddyLogEntry struct {
-	Timestamp float64 `json:"ts"`
-	Request   struct {
+	Timestamp   json.RawMessage `json:"ts"` // Can be float64 or string (RFC3339)
+	Request     struct {
 		Host       string              `json:"host"`
 		URI        string              `json:"uri"`
-		RemoteAddr string              `json:"remote_addr"`
+		RemoteIP   string              `json:"remote_ip"`
+		RemotePort string              `json:"remote_port"`
+		ClientIP   string              `json:"client_ip"`
 		Headers    map[string][]string `json:"headers"`
 	} `json:"request"`
 	Status      int                 `json:"status"`
@@ -452,7 +454,26 @@ func parseCaddyLog(line string) (parsedEntry, error) {
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return parsedEntry{}, err
 	}
-	ts := time.Unix(int64(raw.Timestamp), int64((raw.Timestamp-float64(int64(raw.Timestamp)))*1e9)).UTC()
+
+	// Parse timestamp - can be either float64 (Unix) or string (RFC3339)
+	var ts time.Time
+	if len(raw.Timestamp) > 0 {
+		// Try parsing as float64 first (Unix timestamp)
+		var tsFloat float64
+		if err := json.Unmarshal(raw.Timestamp, &tsFloat); err == nil {
+			ts = time.Unix(int64(tsFloat), int64((tsFloat-float64(int64(tsFloat)))*1e9)).UTC()
+		} else {
+			// Try parsing as string (RFC3339)
+			var tsStr string
+			if err := json.Unmarshal(raw.Timestamp, &tsStr); err == nil {
+				if parsed, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+					ts = parsed.UTC()
+				} else if parsed, err := time.Parse(time.RFC3339, tsStr); err == nil {
+					ts = parsed.UTC()
+				}
+			}
+		}
+	}
 
 	bytes := raw.Bytes
 	if bytes == 0 && raw.Size > 0 {
@@ -464,13 +485,32 @@ func parseCaddyLog(line string) (parsedEntry, error) {
 	}
 	ua := firstHeader(raw.Request.Headers, "User-Agent")
 
+	// Get client IP - prefer real client IP from proxy headers, fall back to direct IP
+	clientIP := firstHeader(raw.Request.Headers, "Cf-Connecting-Ip") // Cloudflare
+	if clientIP == "" {
+		clientIP = firstHeader(raw.Request.Headers, "X-Real-Ip") // nginx proxy
+	}
+	if clientIP == "" {
+		clientIP = firstHeader(raw.Request.Headers, "X-Forwarded-For") // general proxy
+		// X-Forwarded-For can be comma-separated list, take first
+		if idx := strings.Index(clientIP, ","); idx != -1 {
+			clientIP = strings.TrimSpace(clientIP[:idx])
+		}
+	}
+	if clientIP == "" {
+		clientIP = raw.Request.ClientIP // Caddy's client_ip field
+	}
+	if clientIP == "" {
+		clientIP = raw.Request.RemoteIP // direct connection IP
+	}
+
 	return parsedEntry{
 		Timestamp:  ts,
 		Host:       raw.Request.Host,
 		Path:       raw.Request.URI,
 		Status:     raw.Status,
 		Bytes:      bytes,
-		RemoteAddr: raw.Request.RemoteAddr,
+		RemoteAddr: clientIP,
 		Referrer:   ref,
 		UserAgent:  ua,
 		DurationMs: raw.Duration * 1000,
@@ -481,8 +521,16 @@ func firstHeader(h map[string][]string, key string) string {
 	if len(h) == 0 {
 		return ""
 	}
+	// Try exact match first (most common case)
 	if vals, ok := h[key]; ok && len(vals) > 0 {
 		return vals[0]
+	}
+	// Fall back to case-insensitive search
+	keyLower := strings.ToLower(key)
+	for k, vals := range h {
+		if strings.ToLower(k) == keyLower && len(vals) > 0 {
+			return vals[0]
+		}
 	}
 	return ""
 }
