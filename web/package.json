@@ -1,0 +1,21 @@
+{
+  "name": "caddystat-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p _site && postcss src/styles.css -o _site/bundle.css && cp src/index.html _site/index.html",
+    "dev": "npm-run-all -p dev:styles dev:html dev:serve",
+    "dev:styles": "mkdir -p _site && postcss src/styles.css -o _site/bundle.css --watch",
+    "dev:html": "chokidar \"src/index.html\" -c \"cp src/index.html _site/index.html\" --initial",
+    "dev:serve": "http-server _site -p 8405 -c-1"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "chokidar-cli": "^3.0.0",
+    "http-server": "^14.1.1",
+    "npm-run-all": "^4.1.5",
+    "postcss": "^8.4.32",
+    "postcss-cli": "^11.0.0",
+    "tailwindcss": "^3.4.14"
+  }
+}

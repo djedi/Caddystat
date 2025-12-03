@@ -1,0 +1,17 @@
+# Air config for live-reload Go server
+root = "."
+tmp_dir = "./tmp"
+
+[build]
+  cmd = "go build -o ./tmp/caddystat ./cmd/caddystat"
+  bin = "./tmp/caddystat"
+  include_dir = ["cmd", "internal"]
+  exclude_dir = ["web/node_modules", "web/_site", "build", "scripts", "testsite", "MaxMind"]
+  exclude_file = ["*.tmp", "*.log"]
+  full_bin = ""
+
+[log]
+  time = true
+
+[serve]
+  cmd = "./tmp/caddystat"

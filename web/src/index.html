@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en" x-data="{ ...dashboard(), ...themeManager() }" x-init="init(); initTheme()">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Caddystat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/bundle.css" />
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  </head>
+  <body class="page-bg">
+    <div class="page-shell">
+      <!-- Header -->
+      <header class="top-header">
+        <div class="brand">
+          <div class="logo-mark">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3v18h18" />
+              <path d="M18 9l-5 5-4-4-3 3" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h1>Caddystat</h1>
+            <p>Real-time web analytics</p>
+          </div>
+        </div>
+        <div class="status-block">
+          <!-- Theme Switcher -->
+          <div class="theme-switcher">
+            <button
+              @click="setTheme('light')"
+              :class="theme === 'light' ? 'theme-btn active' : 'theme-btn'"
+              title="Light mode"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/>
+                <line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+            </button>
+            <button
+              @click="setTheme('dark')"
+              :class="theme === 'dark' ? 'theme-btn active' : 'theme-btn'"
+              title="Dark mode"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+            </button>
+            <button
+              @click="setTheme('system')"
+              :class="theme === 'system' ? 'theme-btn active' : 'theme-btn'"
+              title="System preference"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+            </button>
+          </div>
+          <div class="status-pill" x-show="activeView === 'live'">
+            <span class="status-signal"></span>
+            <span>Live</span>
+          </div>
+          <div class="timestamp" x-text="lastUpdated ? formatTime(lastUpdated) : 'Connecting...'"></div>
+        </div>
+      </header>
+
+      <!-- Controls -->
+      <div class="control-dock">
+        <div class="segmented">
+          <button @click="setActiveView('live')" :class="activeView === 'live' ? 'segment active' : 'segment'">Live</button>
+          <button @click="setActiveView('archive')" :class="activeView === 'archive' ? 'segment active' : 'segment'">Archive</button>
+        </div>
+        <div class="dock-flex">
+          <label class="label">Host</label>
+          <select x-model="selectedHost" @change="onHostChange()" class="control">
+            <option value="">All hosts</option>
+            <template x-for="h in allHosts" :key="h.host">
+              <option :value="h.host" x-text="h.host"></option>
+            </template>
+          </select>
+        </div>
+        <div class="dock-flex" x-show="activeView === 'archive'">
+          <label class="label">View</label>
+          <select x-model="viewMode" @change="onViewModeChange()" class="control">
+            <option value="month">Monthly</option>
+            <option value="day">Daily</option>
+          </select>
+        </div>
+      </div>
+
+      <main class="grid gap-5">
+        <!-- ============================================
+             ARCHIVE VIEW
+             ============================================ -->
+
+        <!-- Archive Summary -->
+        <template x-if="activeView === 'archive'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Traffic Summary</h2>
+              <span class="panel-subtitle" x-text="rangeLabel()"></span>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Unique Visitors</th>
+                    <th>Visits</th>
+                    <th>Pages</th>
+                    <th>Hits</th>
+                    <th>Bandwidth</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="table-strong text-success">Viewed</td>
+                    <td class="table-mono" x-text="formatNumber(summary?.unique_visitors)"></td>
+                    <td class="table-mono" x-text="formatNumber(summary?.visits)"></td>
+                    <td class="table-mono" x-text="formatNumber(summary?.traffic?.viewed?.pages)"></td>
+                    <td class="table-mono" x-text="formatNumber(summary?.traffic?.viewed?.hits)"></td>
+                    <td class="table-mono" x-text="formatBytes(summary?.traffic?.viewed?.bandwidth_bytes)"></td>
+                  </tr>
+                  <tr>
+                    <td class="table-strong muted">Not Viewed</td>
+                    <td class="muted">-</td>
+                    <td class="muted">-</td>
+                    <td class="table-mono" x-text="formatNumber(summary?.traffic?.not_viewed?.pages)"></td>
+                    <td class="table-mono" x-text="formatNumber(summary?.traffic?.not_viewed?.hits)"></td>
+                    <td class="table-mono" x-text="formatBytes(summary?.traffic?.not_viewed?.bandwidth_bytes)"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </template>
+
+        <!-- Monthly History -->
+        <template x-if="activeView === 'archive' && viewMode === 'month'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Monthly Trend</h2>
+              <span class="panel-subtitle">Last 12 months</span>
+            </div>
+            <div class="bar-chart">
+              <template x-for="m in monthlyHistory.months" :key="m.month_start">
+                <div class="bar-col">
+                  <div class="bar-fill" :style="`height:${barHeight(m.hits)}`" :title="`${formatNumber(m.hits)} hits`"></div>
+                  <div class="bar-label" x-text="formatMonth(m.month_start)"></div>
+                </div>
+              </template>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Unique Visitors</th>
+                    <th>Visits</th>
+                    <th>Pages</th>
+                    <th>Hits</th>
+                    <th>Bandwidth</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="m in monthlyHistory.months" :key="m.month_start">
+                    <tr>
+                      <td class="table-strong" x-text="formatMonth(m.month_start)"></td>
+                      <td class="table-mono" x-text="formatNumber(m.unique_visitors)"></td>
+                      <td class="table-mono" x-text="formatNumber(m.visits)"></td>
+                      <td class="table-mono" x-text="formatNumber(m.pages)"></td>
+                      <td class="table-mono" x-text="formatNumber(m.hits)"></td>
+                      <td class="table-mono" x-text="formatBytes(m.bandwidth_bytes)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>Total</td>
+                    <td class="table-mono" x-text="formatNumber(monthlyHistory.totals?.unique_visitors)"></td>
+                    <td class="table-mono" x-text="formatNumber(monthlyHistory.totals?.visits)"></td>
+                    <td class="table-mono" x-text="formatNumber(monthlyHistory.totals?.pages)"></td>
+                    <td class="table-mono" x-text="formatNumber(monthlyHistory.totals?.hits)"></td>
+                    <td class="table-mono" x-text="formatBytes(monthlyHistory.totals?.bandwidth_bytes)"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </section>
+        </template>
+
+        <!-- Daily History -->
+        <template x-if="activeView === 'archive' && viewMode === 'month'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Daily Breakdown</h2>
+              <span class="panel-subtitle">Current month</span>
+            </div>
+            <div class="bar-chart compact">
+              <template x-for="d in dailyHistory.days" :key="d.date">
+                <div class="bar-col narrow">
+                  <div class="bar-fill alt" :style="`height:${barHeightDaily(d.hits)}`" :title="`${formatNumber(d.hits)} hits`"></div>
+                  <div class="bar-label" x-text="new Date(d.date).getDate().toString().padStart(2,'0')"></div>
+                </div>
+              </template>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    <th>Visits</th>
+                    <th>Pages</th>
+                    <th>Hits</th>
+                    <th>Bandwidth</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="d in dailyHistory.days" :key="d.date">
+                    <tr>
+                      <td class="table-strong" x-text="formatDay(d.date)"></td>
+                      <td class="table-mono" x-text="formatNumber(d.visits)"></td>
+                      <td class="table-mono" x-text="formatNumber(d.pages)"></td>
+                      <td class="table-mono" x-text="formatNumber(d.hits)"></td>
+                      <td class="table-mono" x-text="formatBytes(d.bandwidth_bytes)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>Average</td>
+                    <td class="table-mono" x-text="formatNumber(dailyHistory.average?.visits)"></td>
+                    <td class="table-mono" x-text="formatNumber(dailyHistory.average?.pages)"></td>
+                    <td class="table-mono" x-text="formatNumber(dailyHistory.average?.hits)"></td>
+                    <td class="table-mono" x-text="formatBytes(dailyHistory.average?.bandwidth_bytes)"></td>
+                  </tr>
+                  <tr>
+                    <td>Total</td>
+                    <td class="table-mono" x-text="formatNumber(dailyHistory.totals?.visits)"></td>
+                    <td class="table-mono" x-text="formatNumber(dailyHistory.totals?.pages)"></td>
+                    <td class="table-mono" x-text="formatNumber(dailyHistory.totals?.hits)"></td>
+                    <td class="table-mono" x-text="formatBytes(dailyHistory.totals?.bandwidth_bytes)"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </section>
+        </template>
+
+        <!-- ============================================
+             LIVE VIEW
+             ============================================ -->
+
+        <!-- Key Metrics -->
+        <template x-if="activeView === 'live'">
+          <section class="metrics-grid">
+            <div class="metric-card">
+              <p class="metric-label" x-text="`Requests (${rangeShortLabel()})`"></p>
+              <p class="metric-value" x-text="formatNumber(summary?.total_requests) || '-'"></p>
+            </div>
+            <div class="metric-card">
+              <p class="metric-label" x-text="`Bandwidth (${rangeShortLabel()})`"></p>
+              <p class="metric-value" x-text="formatBytes(summary?.bandwidth_bytes) || '-'"></p>
+            </div>
+            <div class="metric-card">
+              <p class="metric-label" x-text="`Avg Latency (${rangeShortLabel()})`"></p>
+              <p class="metric-value" x-text="summary ? summary.avg_response_time_ms.toFixed(1) + 'ms' : '-'"></p>
+            </div>
+            <div class="metric-card">
+              <p class="metric-label" x-text="`Visitors (${rangeShortLabel()})`"></p>
+              <p class="metric-value" x-text="formatNumber(summary?.unique_visitors) || '-'"></p>
+            </div>
+          </section>
+        </template>
+
+        <!-- Status Breakdown -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Response Codes</h2>
+            </div>
+            <div class="status-grid">
+              <div class="status-card">
+                <p class="status-code">2XX Success</p>
+                <p class="status-value success" x-text="formatNumber(summary?.status_2xx) || '0'"></p>
+                <div class="status-bar">
+                  <div class="status-bar-fill success" :style="`width: ${statusPercent('2xx')}%`"></div>
+                </div>
+              </div>
+              <div class="status-card">
+                <p class="status-code">3XX Redirect</p>
+                <p class="status-value info" x-text="formatNumber(summary?.status_3xx) || '0'"></p>
+                <div class="status-bar">
+                  <div class="status-bar-fill info" :style="`width: ${statusPercent('3xx')}%`"></div>
+                </div>
+              </div>
+              <div class="status-card">
+                <p class="status-code">4XX Client Error</p>
+                <p class="status-value warning" x-text="formatNumber(summary?.status_4xx) || '0'"></p>
+                <div class="status-bar">
+                  <div class="status-bar-fill warning" :style="`width: ${statusPercent('4xx')}%`"></div>
+                </div>
+              </div>
+              <div class="status-card">
+                <p class="status-code">5XX Server Error</p>
+                <p class="status-value danger" x-text="formatNumber(summary?.status_5xx) || '0'"></p>
+                <div class="status-bar">
+                  <div class="status-bar-fill danger" :style="`width: ${statusPercent('5xx')}%`"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+
+        <!-- Top Paths & Hosts -->
+        <template x-if="activeView === 'live'">
+          <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">Top Paths</h2>
+              </div>
+              <ul class="list-stack">
+                <template x-for="item in summary?.top_paths || []" :key="item.path">
+                  <li class="list-row">
+                    <span class="list-primary truncate" x-text="item.path"></span>
+                    <span class="list-count" x-text="formatNumber(item.count)"></span>
+                  </li>
+                </template>
+                <template x-if="!summary || !summary.top_paths || summary.top_paths.length === 0">
+                  <li class="empty-state">No data yet</li>
+                </template>
+              </ul>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">Hosts</h2>
+              </div>
+              <ul class="list-stack">
+                <template x-for="item in summary?.hosts || []" :key="item.host">
+                  <li class="list-row">
+                    <span class="list-primary truncate" x-text="item.host || 'Unknown'"></span>
+                    <span class="list-count" x-text="formatNumber(item.count)"></span>
+                  </li>
+                </template>
+                <template x-if="!summary || !summary.hosts || summary.hosts.length === 0">
+                  <li class="empty-state">No data yet</li>
+                </template>
+              </ul>
+            </div>
+          </section>
+        </template>
+
+        <!-- Error Pages -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Error Pages</h2>
+              <span class="panel-subtitle">4xx & 5xx responses</span>
+            </div>
+            <ul class="list-stack">
+              <template x-for="item in summary?.error_pages || []" :key="item.path + item.status">
+                <li class="list-row">
+                  <span class="list-primary truncate" x-text="item.path"></span>
+                  <div class="list-meta">
+                    <span class="chip" :class="item.status >= 500 ? 'chip-critical' : 'chip-warn'" x-text="item.status"></span>
+                    <span class="list-count" x-text="formatNumber(item.count)"></span>
+                  </div>
+                </li>
+              </template>
+              <template x-if="!summary?.error_pages || summary.error_pages.length === 0">
+                <li class="empty-state">No errors recorded</li>
+              </template>
+            </ul>
+          </section>
+        </template>
+
+        <!-- Recent Activity -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Hourly Activity</h2>
+              <span class="panel-subtitle">Recent buckets</span>
+            </div>
+            <div class="card-grid">
+              <template x-for="row in requests" :key="row.bucket">
+                <div class="mini-card">
+                  <p class="mini-card-time" x-text="new Date(row.bucket).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})"></p>
+                  <p class="mini-card-value" x-text="formatNumber(row.requests)"></p>
+                  <p class="mini-card-sub" x-text="formatBytes(row.bytes)"></p>
+                </div>
+              </template>
+              <template x-if="requests.length === 0">
+                <div class="empty-state">No data yet</div>
+              </template>
+            </div>
+          </section>
+        </template>
+
+        <!-- Geo -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Geography</h2>
+              <span class="panel-subtitle" x-text="rangeShortLabel()"></span>
+            </div>
+            <div class="card-grid card-grid-3">
+              <template x-for="row in geo" :key="row.country + row.city + row.region">
+                <div class="mini-card">
+                  <p class="mini-card-title" x-text="row.country || 'Unknown'"></p>
+                  <p class="mini-card-desc" x-text="`${row.region || ''} ${row.city || ''}`.trim() || '-'"></p>
+                  <p class="mini-card-sub" x-text="formatNumber(row.count) + ' hits'"></p>
+                </div>
+              </template>
+              <template x-if="geo.length === 0">
+                <div class="empty-state">Geo database not configured</div>
+              </template>
+            </div>
+          </section>
+        </template>
+
+        <!-- Visitors (Top IPs) -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Visitors (Top 10)</h2>
+              <span class="panel-subtitle" x-text="rangeShortLabel()"></span>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>IP Address</th>
+                    <th>Country</th>
+                    <th>Pages</th>
+                    <th>Hits</th>
+                    <th>Bandwidth</th>
+                    <th>Last Visit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(v, idx) in visitors" :key="idx">
+                    <tr>
+                      <td class="table-mono" x-text="v.ip"></td>
+                      <td x-text="v.country || '-'"></td>
+                      <td class="table-mono" x-text="formatNumber(v.pages)"></td>
+                      <td class="table-mono" x-text="formatNumber(v.hits)"></td>
+                      <td class="table-mono" x-text="formatBytes(v.bandwidth_bytes)"></td>
+                      <td class="table-mono" x-text="formatDateTime(v.last_visit)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <template x-if="visitors.length === 0">
+                <div class="empty-state">No visitor data yet</div>
+              </template>
+            </div>
+          </section>
+        </template>
+
+        <!-- Robots/Spiders -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Robots/Spiders</h2>
+              <span class="panel-subtitle" x-text="rangeShortLabel()"></span>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Bot Name</th>
+                    <th>Hits</th>
+                    <th>Bandwidth</th>
+                    <th>Last Visit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(r, idx) in robots" :key="idx">
+                    <tr>
+                      <td class="table-strong" x-text="r.name"></td>
+                      <td class="table-mono" x-text="formatNumber(r.hits)"></td>
+                      <td class="table-mono" x-text="formatBytes(r.bandwidth_bytes)"></td>
+                      <td class="table-mono" x-text="formatDateTime(r.last_visit)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <template x-if="robots.length === 0">
+                <div class="empty-state">No bot traffic detected</div>
+              </template>
+            </div>
+          </section>
+        </template>
+
+        <!-- Operating Systems & Browsers -->
+        <template x-if="activeView === 'live'">
+          <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">Operating Systems</h2>
+              </div>
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>OS</th>
+                      <th>Pages</th>
+                      <th>Hits</th>
+                      <th>%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="(o, idx) in operatingSystems" :key="idx">
+                      <tr>
+                        <td class="table-strong"><span class="icon-label"><span x-html="osIcon(o.os)"></span><span x-text="o.os"></span></span></td>
+                        <td class="table-mono" x-text="formatNumber(o.pages)"></td>
+                        <td class="table-mono" x-text="formatNumber(o.hits)"></td>
+                        <td class="table-mono" x-text="o.percent + '%'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+                <template x-if="operatingSystems.length === 0">
+                  <div class="empty-state">No OS data yet</div>
+                </template>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">Browsers</h2>
+              </div>
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Browser</th>
+                      <th>Pages</th>
+                      <th>Hits</th>
+                      <th>%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="(b, idx) in browsers" :key="idx">
+                      <tr>
+                        <td class="table-strong"><span class="icon-label"><span x-html="browserIcon(b.browser)"></span><span x-text="b.browser"></span></span></td>
+                        <td class="table-mono" x-text="formatNumber(b.pages)"></td>
+                        <td class="table-mono" x-text="formatNumber(b.hits)"></td>
+                        <td class="table-mono" x-text="b.percent + '%'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+                <template x-if="browsers.length === 0">
+                  <div class="empty-state">No browser data yet</div>
+                </template>
+              </div>
+            </div>
+          </section>
+        </template>
+
+        <!-- Referrers -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Referrers</h2>
+              <span class="panel-subtitle" x-text="rangeShortLabel()"></span>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Origin</th>
+                    <th>Type</th>
+                    <th>Pages</th>
+                    <th>Hits</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(ref, idx) in filteredReferrers()" :key="idx">
+                    <tr>
+                      <td class="table-strong truncate" style="max-width: 400px;" x-text="ref.referrer"></td>
+                      <td>
+                        <span class="chip" :class="ref.type === 'search' ? 'chip-info' : ref.type === 'direct' ? 'chip-success' : ''" x-text="ref.type"></span>
+                      </td>
+                      <td class="table-mono" x-text="formatNumber(ref.pages)"></td>
+                      <td class="table-mono" x-text="formatNumber(ref.hits)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <template x-if="filteredReferrers().length === 0">
+                <div class="empty-state">No referrer data yet</div>
+              </template>
+            </div>
+          </section>
+        </template>
+      </main>
+    </div>
+
+    <script>
+      // Theme Manager - handles light/dark/system theme switching
+      function themeManager() {
+        return {
+          theme: 'dark',
+
+          initTheme() {
+            // Load saved theme preference
+            const saved = localStorage.getItem('caddystatTheme');
+            if (saved && ['light', 'dark', 'system'].includes(saved)) {
+              this.theme = saved;
+            } else {
+              this.theme = 'dark'; // default
+            }
+            this.applyTheme();
+          },
+
+          setTheme(newTheme) {
+            this.theme = newTheme;
+            localStorage.setItem('caddystatTheme', newTheme);
+            this.applyTheme();
+          },
+
+          applyTheme() {
+            document.documentElement.setAttribute('data-theme', this.theme);
+          }
+        };
+      }
+
+      function dashboard() {
+        return {
+          summary: null,
+          requests: [],
+          geo: [],
+          visitors: [],
+          browsers: [],
+          operatingSystems: [],
+          robots: [],
+          referrers: [],
+          allHosts: [],
+          monthlyHistory: { months: [], totals: {} },
+          monthlyMaxHits: 1,
+          dailyHistory: { days: [], totals: {}, average: {} },
+          dailyMaxHits: 1,
+          selectedHost: '',
+          viewMode: 'month',
+          activeView: 'live',
+          lastUpdated: null,
+          eventSource: null,
+
+          async init() {
+            const savedView = localStorage.getItem('caddystatViewMode');
+            if (savedView === 'day' || savedView === 'month') {
+              this.viewMode = savedView;
+            }
+            const savedActive = localStorage.getItem('caddystatActiveView');
+            if (savedActive === 'live' || savedActive === 'archive') {
+              this.activeView = savedActive;
+            }
+            await this.loadHosts();
+            const savedHost = localStorage.getItem('caddystatSelectedHost');
+            if (savedHost && this.allHosts.some(h => h.host === savedHost)) {
+              this.selectedHost = savedHost;
+            }
+            await this.refresh();
+          },
+
+          async loadHosts() {
+            const res = await fetch(`/api/stats/summary?range=${this.currentRangeValue()}`);
+            if (res.ok) {
+              const data = await res.json();
+              this.allHosts = data.hosts || [];
+            }
+          },
+
+          async refresh() {
+            if (this.activeView === 'live') {
+              await this.refreshLive();
+              this.connect();
+            } else {
+              await this.refreshArchive();
+              this.disconnect();
+            }
+          },
+
+          async refreshLive() {
+            await Promise.all([
+              this.loadSummary(),
+              this.loadRequests(),
+              this.loadGeo(),
+              this.loadVisitors(),
+              this.loadBrowsers(),
+              this.loadOS(),
+              this.loadRobots(),
+              this.loadReferrers()
+            ]);
+          },
+
+          async refreshArchive() {
+            await this.loadSummary();
+            if (this.viewMode === 'month') {
+              await Promise.all([this.loadMonthlyHistory(), this.loadDailyHistory()]);
+            } else {
+              this.monthlyHistory = { months: [], totals: {} };
+              this.dailyHistory = { days: [], totals: {}, average: {} };
+            }
+          },
+
+          liveRangeValue() { return '24h'; },
+          archiveRangeValue() { return this.viewMode === 'month' ? '720h' : '24h'; },
+          currentRangeValue() { return this.activeView === 'archive' ? this.archiveRangeValue() : this.liveRangeValue(); },
+
+          rangeLabel() {
+            if (this.activeView === 'archive') {
+              return this.viewMode === 'month' ? 'Last 30 days' : 'Last 24 hours';
+            }
+            return 'Last 24 hours';
+          },
+
+          rangeShortLabel() {
+            if (this.activeView === 'archive') {
+              return this.viewMode === 'month' ? '30d' : '24h';
+            }
+            return '24h';
+          },
+
+          queryParams() {
+            const params = new URLSearchParams({ range: this.currentRangeValue() });
+            if (this.selectedHost) params.set('host', this.selectedHost);
+            return params.toString();
+          },
+
+          filteredReferrers() {
+            if (!this.selectedHost) return this.referrers;
+            return this.referrers.filter(ref => {
+              if (ref.type === 'direct') return true;
+              try {
+                const url = new URL(ref.referrer);
+                return !url.hostname.includes(this.selectedHost);
+              } catch {
+                return !ref.referrer.includes(this.selectedHost);
+              }
+            });
+          },
+
+          async loadMonthlyHistory() {
+            const res = await fetch(`/api/stats/monthly?months=12${this.selectedHost ? `&host=${encodeURIComponent(this.selectedHost)}` : ''}`);
+            if (res.ok) {
+              const data = await res.json();
+              this.monthlyHistory = data;
+              this.monthlyMaxHits = Math.max(...(data.months || []).map(m => m.hits || 0), 0) || 1;
+            }
+          },
+
+          async loadDailyHistory() {
+            const res = await fetch(`/api/stats/daily${this.selectedHost ? `?host=${encodeURIComponent(this.selectedHost)}` : ''}`);
+            if (res.ok) {
+              const data = await res.json();
+              this.dailyHistory = data;
+              this.dailyMaxHits = Math.max(...(data.days || []).map(d => d.hits || 0), 0) || 1;
+            }
+          },
+
+          async loadSummary() {
+            const res = await fetch(`/api/stats/summary?${this.queryParams()}`);
+            if (res.ok) {
+              this.summary = await res.json();
+              this.lastUpdated = new Date();
+            }
+          },
+
+          async loadRequests() {
+            const res = await fetch(`/api/stats/requests?${this.queryParams()}`);
+            if (res.ok) {
+              const data = await res.json();
+              this.requests = Array.isArray(data) ? data : [];
+            }
+          },
+
+          async loadGeo() {
+            const res = await fetch(`/api/stats/geo?${this.queryParams()}`);
+            if (res.ok) {
+              this.geo = await res.json();
+            }
+          },
+
+          async loadVisitors() {
+            const res = await fetch(`/api/stats/hosts?${this.queryParams()}&limit=10`);
+            if (res.ok) {
+              this.visitors = await res.json() || [];
+            }
+          },
+
+          async loadBrowsers() {
+            const res = await fetch(`/api/stats/browsers?${this.queryParams()}`);
+            if (res.ok) {
+              this.browsers = await res.json() || [];
+            }
+          },
+
+          async loadOS() {
+            const res = await fetch(`/api/stats/os?${this.queryParams()}`);
+            if (res.ok) {
+              this.operatingSystems = await res.json() || [];
+            }
+          },
+
+          async loadRobots() {
+            const res = await fetch(`/api/stats/robots?${this.queryParams()}`);
+            if (res.ok) {
+              this.robots = await res.json() || [];
+            }
+          },
+
+          async loadReferrers() {
+            const res = await fetch(`/api/stats/referrers?${this.queryParams()}`);
+            if (res.ok) {
+              this.referrers = await res.json() || [];
+            }
+          },
+
+          connect() {
+            if (this.activeView !== 'live') {
+              this.disconnect();
+              return;
+            }
+            if (this.eventSource) this.eventSource.close();
+            const url = `/api/sse?${this.queryParams()}`;
+            this.eventSource = new EventSource(url);
+            this.eventSource.onmessage = (event) => {
+              try {
+                this.summary = JSON.parse(event.data);
+                this.lastUpdated = new Date();
+              } catch (err) {
+                console.error("SSE parse error:", err);
+              }
+            };
+            this.eventSource.onerror = () => {
+              setTimeout(() => this.connect(), 2000);
+            };
+          },
+
+          disconnect() {
+            if (this.eventSource) {
+              this.eventSource.close();
+              this.eventSource = null;
+            }
+          },
+
+          async setActiveView(view) {
+            if (view !== 'live' && view !== 'archive') return;
+            this.activeView = view;
+            localStorage.setItem('caddystatActiveView', view);
+            await this.refresh();
+          },
+
+          async onHostChange() {
+            localStorage.setItem('caddystatSelectedHost', this.selectedHost);
+            await this.refresh();
+          },
+
+          async onViewModeChange() {
+            localStorage.setItem('caddystatViewMode', this.viewMode);
+            await this.loadHosts();
+            await this.refresh();
+          },
+
+          // Formatting helpers
+          formatBytes(bytes) {
+            if (bytes === undefined || bytes === null) return "-";
+            if (bytes === 0) return "0 B";
+            const units = ["B", "KB", "MB", "GB", "TB"];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            const value = bytes / Math.pow(1024, i);
+            return `${value.toFixed(1)} ${units[i]}`;
+          },
+
+          formatNumber(value) {
+            if (value === undefined || value === null) return "-";
+            return value.toLocaleString();
+          },
+
+          formatMonth(dateStr) {
+            if (!dateStr) return "-";
+            const dt = new Date(dateStr);
+            return dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+          },
+
+          formatDay(dateStr) {
+            if (!dateStr) return "-";
+            const dt = new Date(dateStr);
+            return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+          },
+
+          formatTime(date) {
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          },
+
+          osIcon(os) {
+            const name = (os || '').toLowerCase();
+            const icons = {
+              'windows': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75l6-1.32v6.48L3 12zm17-9v8.75l-10 .15V5.21L20 3zM3 13l6 .09v6.81l-6-1.15V13zm17 .25V22l-10-1.91V13.1l10 .15z"/></svg>',
+              'macos': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>',
+              'linux': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 00-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139zm.529 3.405h.013c.213 0 .396.062.584.198.19.135.33.332.438.533.105.259.158.459.166.724 0-.02.006-.04.006-.06v.105a.086.086 0 01-.004-.021l-.004-.024a1.807 1.807 0 01-.15.706.953.953 0 01-.213.335.71.71 0 00-.088-.042c-.104-.045-.198-.064-.284-.133a1.312 1.312 0 00-.22-.066c.05-.06.146-.133.183-.198.053-.128.082-.264.088-.402v-.02a1.21 1.21 0 00-.061-.4c-.045-.134-.101-.2-.183-.333-.084-.066-.167-.132-.267-.132h-.016c-.093 0-.176.03-.262.132a.8.8 0 00-.205.334 1.18 1.18 0 00-.09.4v.019c.002.089.008.179.02.267-.193-.067-.438-.135-.607-.202a1.635 1.635 0 01-.018-.2v-.02a1.772 1.772 0 01.15-.768c.082-.22.232-.406.43-.533a.985.985 0 01.594-.2zm-2.962.059h.036c.142 0 .27.048.399.135.146.129.264.288.344.465.09.199.14.4.153.667v.004c.007.134.006.2-.002.266v.08c-.03.007-.056.018-.083.024-.152.055-.274.135-.393.2.012-.09.013-.18.003-.267v-.015c-.012-.133-.04-.2-.082-.333a.613.613 0 00-.166-.267.248.248 0 00-.183-.064h-.021c-.071.006-.13.04-.186.132a.552.552 0 00-.12.27.944.944 0 00-.023.33v.015c.012.135.037.2.08.334.046.134.098.2.166.268.01.009.02.018.034.024-.07.057-.117.07-.176.136a.304.304 0 01-.131.068 2.62 2.62 0 01-.275-.402 1.772 1.772 0 01-.155-.667 1.759 1.759 0 01.08-.668 1.43 1.43 0 01.283-.535c.128-.133.26-.2.418-.2zm1.37 1.706c.332 0 .733.065 1.216.399.293.2.523.269 1.052.468h.003c.255.136.405.266.478.399v-.131a.571.571 0 01.016.47c-.123.31-.516.643-1.063.842v.002c-.268.135-.501.333-.775.465-.276.135-.588.292-1.012.267a1.139 1.139 0 01-.448-.067 3.566 3.566 0 01-.322-.198c-.195-.135-.363-.332-.612-.465v-.005h-.005c-.4-.246-.616-.512-.686-.71-.07-.268-.005-.47.193-.6.224-.135.38-.271.483-.336.104-.074.143-.102.176-.131h.002v-.003c.169-.202.436-.47.839-.601.139-.036.294-.065.466-.065zm2.8 2.142c.358 1.417 1.196 3.475 1.735 4.473.286.534.855 1.659 1.102 3.024.156-.005.33.018.513.064.646-1.671-.546-3.467-1.089-3.966-.22-.2-.232-.335-.123-.335.59.534 1.365 1.572 1.646 2.757.13.535.16 1.104.021 1.67.067.028.135.06.205.067 1.032.534 1.413.938 1.23 1.537v-.002c-.06-.135-.12-.2-.246-.334-.18-.135-.39-.2-.59-.2-.08 0-.158.011-.235.02l.003.067h.002c-.052 0-.164.008-.377.064a.82.82 0 00-.52.467 1.08 1.08 0 00-.063.066.82.82 0 01-.086.063c.003-.014.01-.027.012-.041l.006-.024a.373.373 0 00-.098-.2 1.107 1.107 0 00-.325-.268c-.142-.066-.293-.133-.453-.133h-.004c-.066 0-.13.01-.195.032a1.6 1.6 0 00-.536.266c-.07.066-.1.2-.1.333v.002c.002.166.08.264.166.401.08.065.18.132.3.132.166 0 .269-.066.336-.134a.515.515 0 00.1-.2h.005c.003.03.004.063.003.096-.01.196-.078.397-.194.598-.29.4-.725.6-1.095.6-.29 0-.547-.133-.673-.467-.094-.2-.102-.533-.102-.866 0-.8.024-1.6.024-1.6s-.022-.136-.046-.2a.682.682 0 00-.138-.266c-.18-.2-.334-.4-.467-.6-.133-.2-.2-.4-.267-.6-.134-.4-.266-.735-.4-1.068-.133-.4-.2-.8-.2-1.134v-.004c.003-1 .534-1.9 1.337-2.433.53-.333 1.166-.533 1.833-.533h.006c.333 0 .666.067.933.2z"/></svg>',
+              'android': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.34q-.544 0-.918-.374-.373-.375-.373-.92 0-.544.373-.918.374-.375.92-.375.544 0 .918.375.374.374.374.919 0 .544-.374.919-.374.374-.92.374zm-11.046 0q-.544 0-.919-.374-.374-.375-.374-.92 0-.544.374-.918.375-.375.919-.375.545 0 .919.375.374.374.374.919 0 .544-.374.919-.374.374-.919.374zM17.714 7.2l1.747-3.028q.108-.197.035-.4-.073-.2-.27-.272-.2-.073-.4.036l-1.772 3.074q-1.385-.629-2.992-.629-1.606 0-2.99.63L9.3 3.535q-.109-.109-.31-.036-.196.072-.27.273-.072.202.036.4l1.746 3.027Q7.146 8.83 5.5 12.122h13.126q-1.647-3.292-4.912-4.922z"/><path fill="none" d="M0 0h24v24H0z"/></svg>',
+              'ios': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>',
+              'chrome os': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/><circle cx="12" cy="12" r="4"/></svg>'
+            };
+            for (const [key, icon] of Object.entries(icons)) {
+              if (name.includes(key)) return icon;
+            }
+            return '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>';
+          },
+
+          browserIcon(browser) {
+            const name = (browser || '').toLowerCase();
+            const icons = {
+              'chrome': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/><circle cx="12" cy="12" r="4"/></svg>',
+              'firefox': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-2.44 7.17-1.15 1.23-2.74 1.87-4.39 1.78-1.39-.08-2.71-.72-3.64-1.78a5.75 5.75 0 01-1.35-3.87c.08-1.7.88-3.27 2.2-4.28.88-.67 1.91-1.07 2.99-1.17.33 0 .66.03.97.1-.37.25-.61.65-.66 1.1-.06.51.12 1.03.48 1.4.36.37.87.58 1.39.58.52 0 1.03-.21 1.4-.58.36-.37.54-.89.48-1.4a1.72 1.72 0 00-.66-1.1c.31-.07.64-.1.97-.1 1.08.1 2.11.5 2.99 1.17 1.09.83 1.85 2.03 2.1 3.35.02.2.05.41.05.63z"/></svg>',
+              'safari': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm-1-6l-4 4 8-5-4 1zm1-4l4-4-8 5 4-1z"/></svg>',
+              'edge': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.12 0 4.07.74 5.62 1.97L12 12h9z"/></svg>',
+              'opera': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 16c-2.21 0-4-2.69-4-6s1.79-6 4-6 4 2.69 4 6-1.79 6-4 6z"/></svg>',
+              'mozilla': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-2.44 7.17-1.15 1.23-2.74 1.87-4.39 1.78-1.39-.08-2.71-.72-3.64-1.78a5.75 5.75 0 01-1.35-3.87c.08-1.7.88-3.27 2.2-4.28.88-.67 1.91-1.07 2.99-1.17.33 0 .66.03.97.1-.37.25-.61.65-.66 1.1-.06.51.12 1.03.48 1.4.36.37.87.58 1.39.58.52 0 1.03-.21 1.4-.58.36-.37.54-.89.48-1.4a1.72 1.72 0 00-.66-1.1c.31-.07.64-.1.97-.1 1.08.1 2.11.5 2.99 1.17 1.09.83 1.85 2.03 2.1 3.35.02.2.05.41.05.63z"/></svg>',
+              'curl': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>',
+              'python': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>',
+              'go-http': '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>'
+            };
+            for (const [key, icon] of Object.entries(icons)) {
+              if (name.includes(key)) return icon;
+            }
+            return '<svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>';
+          },
+
+          formatDateTime(dateStr) {
+            if (!dateStr) return '-';
+            const dt = new Date(dateStr);
+            return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                   dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          },
+
+          barHeight(val) {
+            if (!this.monthlyMaxHits) return '0%';
+            return `${Math.max(4, Math.round((val / this.monthlyMaxHits) * 100))}%`;
+          },
+
+          barHeightDaily(val) {
+            if (!this.dailyMaxHits) return '0%';
+            return `${Math.max(4, Math.round((val / this.dailyMaxHits) * 100))}%`;
+          },
+
+          statusPercent(code) {
+            if (!this.summary) return 0;
+            const total = (this.summary.status_2xx || 0) + (this.summary.status_3xx || 0) +
+                          (this.summary.status_4xx || 0) + (this.summary.status_5xx || 0);
+            if (total === 0) return 0;
+            const value = this.summary[`status_${code}`] || 0;
+            return Math.round((value / total) * 100);
+          }
+        };
+      }
+    </script>
+  </body>
+</html>

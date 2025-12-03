@@ -1,0 +1,53 @@
+services:
+  testsite:
+    image: nginx:alpine
+    container_name: testsite
+    volumes:
+      - ./testsite:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    depends_on:
+      - testsite
+
+  caddystat:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: caddystat
+    environment:
+      - LOG_PATH=/var/log/caddy/access.log
+      - LISTEN_ADDR=:8404
+      - DB_PATH=/data/caddystat.db
+      - DATA_RETENTION_DAYS=830
+      - MAXMIND_DB_PATH=/maxmind/GeoLite2-City.mmdb
+      - CHOKIDAR_USEPOLLING=1
+    volumes:
+      - caddy_logs:/var/log/caddy
+      - caddystat_data:/data
+      - ./MaxMind:/maxmind:ro
+      - .:/app
+      - /app/web/node_modules
+    ports:
+      - "8404:8404"
+      - "8405:8405"
+    restart: unless-stopped
+    depends_on:
+      - caddy
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
+  caddystat_data:
