@@ -1152,6 +1152,30 @@ WHERE ts >= ? AND is_bot = 0`
 	return out, rows.Err()
 }
 
+// RecentRequest represents a single request with all its details for display
+type RecentRequest struct {
+	ID             int64     `json:"id"`
+	Timestamp      time.Time `json:"timestamp"`
+	Host           string    `json:"host"`
+	Path           string    `json:"path"`
+	Status         int       `json:"status"`
+	Bytes          int64     `json:"bytes"`
+	IP             string    `json:"ip"`
+	Referrer       string    `json:"referrer"`
+	UserAgent      string    `json:"user_agent"`
+	ResponseTime   float64   `json:"response_time_ms"`
+	Country        string    `json:"country"`
+	Region         string    `json:"region"`
+	City           string    `json:"city"`
+	Browser        string    `json:"browser"`
+	BrowserVersion string    `json:"browser_version"`
+	OS             string    `json:"os"`
+	OSVersion      string    `json:"os_version"`
+	DeviceType     string    `json:"device_type"`
+	IsBot          bool      `json:"is_bot"`
+	BotName        string    `json:"bot_name"`
+}
+
 // ImportProgress tracks how much of a log file has been imported
 type ImportProgress struct {
 	FilePath   string
@@ -1190,4 +1214,63 @@ ON CONFLICT(file_path) DO UPDATE SET
 	updated_at = excluded.updated_at
 `, p.FilePath, p.ByteOffset, p.FileSize, p.FileMtime, time.Now())
 	return err
+}
+
+// RecentRequests returns the most recent N requests, optionally filtered by host
+func (s *Storage) RecentRequests(ctx context.Context, limit int, host string) ([]RecentRequest, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	query := `
+SELECT
+	id, ts, host, path, status, bytes, ip, referrer, user_agent, resp_time_ms,
+	IFNULL(country, '') as country, IFNULL(region, '') as region, IFNULL(city, '') as city,
+	IFNULL(browser, '') as browser, IFNULL(browser_version, '') as browser_version,
+	IFNULL(os, '') as os, IFNULL(os_version, '') as os_version,
+	IFNULL(device_type, '') as device_type, IFNULL(is_bot, 0) as is_bot, IFNULL(bot_name, '') as bot_name
+FROM requests`
+
+	args := []any{}
+	if host != "" {
+		query += " WHERE host = ?"
+		args = append(args, host)
+	}
+	query += " ORDER BY id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]RecentRequest, 0)
+	for rows.Next() {
+		var r RecentRequest
+		var tsStr sql.NullString
+		var isBot int
+		if err := rows.Scan(
+			&r.ID, &tsStr, &r.Host, &r.Path, &r.Status, &r.Bytes, &r.IP, &r.Referrer, &r.UserAgent, &r.ResponseTime,
+			&r.Country, &r.Region, &r.City, &r.Browser, &r.BrowserVersion,
+			&r.OS, &r.OSVersion, &r.DeviceType, &isBot, &r.BotName,
+		); err != nil {
+			return nil, err
+		}
+		r.IsBot = isBot != 0
+		if tsStr.Valid {
+			r.Timestamp, _ = time.Parse("2006-01-02 15:04:05.999999999-07:00", tsStr.String)
+			if r.Timestamp.IsZero() {
+				r.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr.String)
+			}
+			if r.Timestamp.IsZero() {
+				r.Timestamp, _ = time.Parse("2006-01-02T15:04:05Z", tsStr.String)
+			}
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

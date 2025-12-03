@@ -39,6 +39,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/stats/os", s.handleOS)
 	s.mux.HandleFunc("/api/stats/robots", s.handleRobots)
 	s.mux.HandleFunc("/api/stats/referrers", s.handleReferrers)
+	s.mux.HandleFunc("/api/stats/recent", s.handleRecentRequests)
 	s.mux.HandleFunc("/api/sse", s.handleSSE)
 
 	site := http.Dir(filepath.Join(".", "web", "_site"))
@@ -167,6 +168,22 @@ func (s *Server) handleReferrers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, stats)
 }
 
+func (s *Server) handleRecentRequests(w http.ResponseWriter, r *http.Request) {
+	host := r.URL.Query().Get("host")
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100 {
+			limit = v
+		}
+	}
+	stats, err := s.store.RecentRequests(r.Context(), limit, host)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, stats)
+}
+
 func (s *Server) handleMonthly(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	months := 12
@@ -212,7 +229,15 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Send an initial snapshot.
 	if summary, err := s.store.Summary(r.Context(), dur, host); err == nil {
 		if buf, err := json.Marshal(summary); err == nil {
-			writeSSE(w, buf)
+			writeSSE(w, "", buf)
+			flusher.Flush()
+		}
+	}
+
+	// Also send initial recent requests
+	if recent, err := s.store.RecentRequests(r.Context(), 20, host); err == nil {
+		if buf, err := json.Marshal(recent); err == nil {
+			writeSSE(w, "recent", buf)
 			flusher.Flush()
 		}
 	}
@@ -221,19 +246,30 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ch:
-			// Re-fetch with host filter on each update
-			if summary, err := s.store.Summary(r.Context(), dur, host); err == nil {
-				if buf, err := json.Marshal(summary); err == nil {
-					writeSSE(w, buf)
-					flusher.Flush()
+		case evt := <-ch:
+			if evt.Type == "request" {
+				// New request event - send directly
+				writeSSE(w, "request", evt.Payload)
+				flusher.Flush()
+			} else {
+				// Summary update - re-fetch with host filter
+				if summary, err := s.store.Summary(r.Context(), dur, host); err == nil {
+					if buf, err := json.Marshal(summary); err == nil {
+						writeSSE(w, "", buf)
+						flusher.Flush()
+					}
 				}
 			}
 		}
 	}
 }
 
-func writeSSE(w http.ResponseWriter, payload []byte) {
+func writeSSE(w http.ResponseWriter, eventType string, payload []byte) {
+	if eventType != "" {
+		_, _ = w.Write([]byte("event: "))
+		_, _ = w.Write([]byte(eventType))
+		_, _ = w.Write([]byte("\n"))
+	}
 	_, _ = w.Write([]byte("data: "))
 	_, _ = w.Write(payload)
 	_, _ = w.Write([]byte("\n\n"))

@@ -336,6 +336,33 @@ func (i *Ingestor) handleLine(ctx context.Context, line string) error {
 	}
 
 	if i.hub != nil {
+		// Broadcast the new request for live request log
+		reqEvent := storage.RecentRequest{
+			Timestamp:      record.Timestamp,
+			Host:           record.Host,
+			Path:           record.Path,
+			Status:         record.Status,
+			Bytes:          record.Bytes,
+			IP:             record.IP,
+			Referrer:       record.Referrer,
+			UserAgent:      record.UserAgent,
+			ResponseTime:   record.ResponseTime,
+			Country:        record.Country,
+			Region:         record.Region,
+			City:           record.City,
+			Browser:        record.Browser,
+			BrowserVersion: record.BrowserVersion,
+			OS:             record.OS,
+			OSVersion:      record.OSVersion,
+			DeviceType:     record.DeviceType,
+			IsBot:          record.IsBot,
+			BotName:        record.BotName,
+		}
+		if buf, err := json.Marshal(reqEvent); err == nil {
+			i.hub.BroadcastEvent("request", buf)
+		}
+
+		// Also broadcast the summary update
 		if summary, err := i.store.Summary(ctx, time.Duration(i.cfg.RawRetentionHours)*time.Hour, ""); err == nil {
 			if buf, err := json.Marshal(summary); err == nil {
 				i.hub.Broadcast(buf)

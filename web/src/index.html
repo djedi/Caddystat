@@ -607,7 +607,154 @@
             </div>
           </section>
         </template>
+
+        <!-- Recent Requests (Live Log) -->
+        <template x-if="activeView === 'live'">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Recent Requests</h2>
+              <span class="panel-subtitle">Last 20 requests (live)</span>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>IP</th>
+                    <th>Latency</th>
+                    <th>Size</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(req, idx) in recentRequests" :key="req.id || idx">
+                    <tr class="request-row" @click="showRequestDetail(req)" style="cursor: pointer;">
+                      <td class="table-mono" x-text="formatRequestTime(req.timestamp)"></td>
+                      <td>
+                        <span class="chip" :class="statusChipClass(req.status)" x-text="req.status"></span>
+                      </td>
+                      <td class="table-mono">GET</td>
+                      <td class="table-strong truncate" style="max-width: 300px;" x-text="req.path"></td>
+                      <td class="table-mono" x-text="req.ip"></td>
+                      <td class="table-mono" x-text="req.response_time_ms ? req.response_time_ms.toFixed(1) + 'ms' : '-'"></td>
+                      <td class="table-mono" x-text="formatBytes(req.bytes)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <template x-if="recentRequests.length === 0">
+                <div class="empty-state">No requests yet</div>
+              </template>
+            </div>
+          </section>
+        </template>
       </main>
+    </div>
+
+    <!-- Request Detail Modal -->
+    <div class="modal-backdrop" x-show="selectedRequest" @click.self="selectedRequest = null" @keydown.escape.window="selectedRequest = null" x-cloak>
+      <div class="modal-content" x-show="selectedRequest" x-transition>
+        <div class="modal-header">
+          <h3 class="modal-title">Request Details</h3>
+          <button class="modal-close" @click="selectedRequest = null">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body" x-show="selectedRequest">
+          <div class="detail-grid">
+            <div class="detail-section">
+              <h4 class="detail-section-title">Request Info</h4>
+              <dl class="detail-list">
+                <div class="detail-row">
+                  <dt>Timestamp</dt>
+                  <dd x-text="selectedRequest ? formatFullDateTime(selectedRequest.timestamp) : ''"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Host</dt>
+                  <dd x-text="selectedRequest?.host || '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Path</dt>
+                  <dd class="break-all" x-text="selectedRequest?.path || '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Status</dt>
+                  <dd>
+                    <span class="chip" :class="selectedRequest ? statusChipClass(selectedRequest.status) : ''" x-text="selectedRequest?.status || '-'"></span>
+                  </dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Response Time</dt>
+                  <dd x-text="selectedRequest?.response_time_ms ? selectedRequest.response_time_ms.toFixed(2) + ' ms' : '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Response Size</dt>
+                  <dd x-text="selectedRequest ? formatBytes(selectedRequest.bytes) : '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Referrer</dt>
+                  <dd class="break-all" x-text="selectedRequest?.referrer || 'Direct'"></dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="detail-section">
+              <h4 class="detail-section-title">Client Info</h4>
+              <dl class="detail-list">
+                <div class="detail-row">
+                  <dt>IP Address</dt>
+                  <dd x-text="selectedRequest?.ip || '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Country</dt>
+                  <dd x-text="selectedRequest?.country || '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Region</dt>
+                  <dd x-text="selectedRequest?.region || '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>City</dt>
+                  <dd x-text="selectedRequest?.city || '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Browser</dt>
+                  <dd x-text="selectedRequest?.browser ? `${selectedRequest.browser} ${selectedRequest.browser_version || ''}`.trim() : '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>OS</dt>
+                  <dd x-text="selectedRequest?.os ? `${selectedRequest.os} ${selectedRequest.os_version || ''}`.trim() : '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Device Type</dt>
+                  <dd x-text="selectedRequest?.device_type || '-'"></dd>
+                </div>
+                <div class="detail-row">
+                  <dt>Is Bot</dt>
+                  <dd>
+                    <template x-if="selectedRequest?.is_bot">
+                      <span class="chip chip-warn" x-text="selectedRequest?.bot_name || 'Bot'"></span>
+                    </template>
+                    <template x-if="!selectedRequest?.is_bot">
+                      <span>No</span>
+                    </template>
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          <div class="detail-section" style="margin-top: 1rem;">
+            <h4 class="detail-section-title">User Agent</h4>
+            <p class="user-agent-text" x-text="selectedRequest?.user_agent || '-'"></p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -649,6 +796,8 @@
           operatingSystems: [],
           robots: [],
           referrers: [],
+          recentRequests: [],
+          selectedRequest: null,
           allHosts: [],
           monthlyHistory: { months: [], totals: {} },
           monthlyMaxHits: 1,
@@ -704,7 +853,8 @@
               this.loadBrowsers(),
               this.loadOS(),
               this.loadRobots(),
-              this.loadReferrers()
+              this.loadReferrers(),
+              this.loadRecentRequests()
             ]);
           },
 
@@ -831,6 +981,15 @@
             }
           },
 
+          async loadRecentRequests() {
+            const params = new URLSearchParams({ limit: '20' });
+            if (this.selectedHost) params.set('host', this.selectedHost);
+            const res = await fetch(`/api/stats/recent?${params.toString()}`);
+            if (res.ok) {
+              this.recentRequests = await res.json() || [];
+            }
+          },
+
           connect() {
             if (this.activeView !== 'live') {
               this.disconnect();
@@ -839,6 +998,8 @@
             if (this.eventSource) this.eventSource.close();
             const url = `/api/sse?${this.queryParams()}`;
             this.eventSource = new EventSource(url);
+
+            // Default message event (summary updates)
             this.eventSource.onmessage = (event) => {
               try {
                 this.summary = JSON.parse(event.data);
@@ -847,6 +1008,31 @@
                 console.error("SSE parse error:", err);
               }
             };
+
+            // Recent requests list (initial load)
+            this.eventSource.addEventListener('recent', (event) => {
+              try {
+                this.recentRequests = JSON.parse(event.data) || [];
+              } catch (err) {
+                console.error("SSE recent parse error:", err);
+              }
+            });
+
+            // New request event (live updates)
+            this.eventSource.addEventListener('request', (event) => {
+              try {
+                const newReq = JSON.parse(event.data);
+                // Check host filter
+                if (this.selectedHost && newReq.host !== this.selectedHost) {
+                  return;
+                }
+                // Add to front, keep max 20
+                this.recentRequests = [newReq, ...this.recentRequests].slice(0, 20);
+              } catch (err) {
+                console.error("SSE request parse error:", err);
+              }
+            });
+
             this.eventSource.onerror = () => {
               setTimeout(() => this.connect(), 2000);
             };
@@ -967,6 +1153,39 @@
             if (total === 0) return 0;
             const value = this.summary[`status_${code}`] || 0;
             return Math.round((value / total) * 100);
+          },
+
+          // Request log helpers
+          showRequestDetail(req) {
+            this.selectedRequest = req;
+          },
+
+          formatRequestTime(dateStr) {
+            if (!dateStr) return '-';
+            const dt = new Date(dateStr);
+            return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          },
+
+          formatFullDateTime(dateStr) {
+            if (!dateStr) return '-';
+            const dt = new Date(dateStr);
+            return dt.toLocaleString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit'
+            });
+          },
+
+          statusChipClass(status) {
+            if (!status) return '';
+            if (status >= 200 && status < 300) return 'chip-success';
+            if (status >= 300 && status < 400) return 'chip-info';
+            if (status >= 400 && status < 500) return 'chip-warn';
+            if (status >= 500) return 'chip-critical';
+            return '';
           }
         };
       }
