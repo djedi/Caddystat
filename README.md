@@ -1,14 +1,25 @@
 # Caddystat
 
-Minimal proof-of-concept stats and live dashboard for Caddy access logs.
+Lightweight stats and a live dashboard for Caddy access logs.
+
+- Live summaries via SSE for recent traffic
+- GeoIP enrichment (optional) with privacy controls
+- Docker- and Go-friendly deployment
+- Minimal footprint with SQLite storage
 
 ## Quick start (local)
+
+Prereqs: Go 1.22+. From the repo root:
 
 ```bash
 go run ./cmd/caddystat
 ```
 
-Env vars:
+Visit `http://localhost:8000/` for the dashboard.
+
+## Configuration
+
+Environment variables:
 
 - `LOG_PATH`: Comma-separated Caddy log paths (default `./caddy.log`).
 - `LISTEN_ADDR`: HTTP bind (default `:8000`).
@@ -154,6 +165,21 @@ The Go server serves `web/_site` at `/`.
 - `GET /api/stats/requests?range=24h` – hourly buckets.
 - `GET /api/stats/geo?range=24h` – country/region/city counts (empty if GeoLite not configured).
 - `GET /api/sse` – server-sent events with live summary snapshots.
+
+## Development
+
+- Run API locally: `go run ./cmd/caddystat`.
+- Build frontend: `cd web && npm install && npm run build`.
+- Run tests: `go test ./...`.
+- Document new env vars or flags when adding features.
+
+## Contributing and support
+
+Contributions are welcome! Please read `CONTRIBUTING.md` for workflows and `CODE_OF_CONDUCT.md` for expected behavior. Open issues for bugs/ideas; include logs, repro steps, and config snippets when possible.
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for details.
 
 ## Notes
 

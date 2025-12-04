@@ -56,7 +56,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    cfg.ListenAddr,
-		Handler: server.New(store, hub),
+		Handler: server.New(store, hub, cfg),
 	}
 
 	go func() {

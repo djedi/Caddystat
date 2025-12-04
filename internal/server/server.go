@@ -1,46 +1,62 @@
 package server
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/dustin/Caddystat/internal/config"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
 )
 
 type Server struct {
-	store *storage.Storage
-	hub   *sse.Hub
-	mux   *http.ServeMux
+	store    *storage.Storage
+	hub      *sse.Hub
+	mux      *http.ServeMux
+	cfg      config.Config
+	sessions map[string]time.Time
+	sessMu   sync.RWMutex
 }
 
-func New(store *storage.Storage, hub *sse.Hub) *Server {
+func New(store *storage.Storage, hub *sse.Hub, cfg config.Config) *Server {
 	s := &Server{
-		store: store,
-		hub:   hub,
-		mux:   http.NewServeMux(),
+		store:    store,
+		hub:      hub,
+		mux:      http.NewServeMux(),
+		cfg:      cfg,
+		sessions: make(map[string]time.Time),
 	}
 	s.routes()
 	return s
 }
 
 func (s *Server) routes() {
-	s.mux.HandleFunc("/api/stats/summary", s.handleSummary)
-	s.mux.HandleFunc("/api/stats/monthly", s.handleMonthly)
-	s.mux.HandleFunc("/api/stats/daily", s.handleDaily)
-	s.mux.HandleFunc("/api/stats/requests", s.handleRequests)
-	s.mux.HandleFunc("/api/stats/geo", s.handleGeo)
-	s.mux.HandleFunc("/api/stats/hosts", s.handleVisitors)
-	s.mux.HandleFunc("/api/stats/browsers", s.handleBrowsers)
-	s.mux.HandleFunc("/api/stats/os", s.handleOS)
-	s.mux.HandleFunc("/api/stats/robots", s.handleRobots)
-	s.mux.HandleFunc("/api/stats/referrers", s.handleReferrers)
-	s.mux.HandleFunc("/api/stats/recent", s.handleRecentRequests)
-	s.mux.HandleFunc("/api/sse", s.handleSSE)
+	// Auth endpoints (always accessible)
+	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
+	s.mux.HandleFunc("/api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
+
+	// Protected API endpoints
+	s.mux.HandleFunc("/api/stats/summary", s.requireAuth(s.handleSummary))
+	s.mux.HandleFunc("/api/stats/monthly", s.requireAuth(s.handleMonthly))
+	s.mux.HandleFunc("/api/stats/daily", s.requireAuth(s.handleDaily))
+	s.mux.HandleFunc("/api/stats/requests", s.requireAuth(s.handleRequests))
+	s.mux.HandleFunc("/api/stats/geo", s.requireAuth(s.handleGeo))
+	s.mux.HandleFunc("/api/stats/hosts", s.requireAuth(s.handleVisitors))
+	s.mux.HandleFunc("/api/stats/browsers", s.requireAuth(s.handleBrowsers))
+	s.mux.HandleFunc("/api/stats/os", s.requireAuth(s.handleOS))
+	s.mux.HandleFunc("/api/stats/robots", s.requireAuth(s.handleRobots))
+	s.mux.HandleFunc("/api/stats/referrers", s.requireAuth(s.handleReferrers))
+	s.mux.HandleFunc("/api/stats/recent", s.requireAuth(s.handleRecentRequests))
+	s.mux.HandleFunc("/api/sse", s.requireAuth(s.handleSSE))
 
 	site := http.Dir(filepath.Join(".", "web", "_site"))
 	s.mux.Handle("/", http.FileServer(site))
@@ -48,6 +64,158 @@ func (s *Server) routes() {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// Authentication methods
+
+const sessionCookieName = "caddystat_session"
+const sessionDuration = 24 * time.Hour
+
+func (s *Server) generateSessionToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+func (s *Server) createSession() (string, error) {
+	token, err := s.generateSessionToken()
+	if err != nil {
+		return "", err
+	}
+	s.sessMu.Lock()
+	s.sessions[token] = time.Now().Add(sessionDuration)
+	s.sessMu.Unlock()
+	return token, nil
+}
+
+func (s *Server) validateSession(token string) bool {
+	s.sessMu.RLock()
+	expiry, exists := s.sessions[token]
+	s.sessMu.RUnlock()
+	if !exists {
+		return false
+	}
+	if time.Now().After(expiry) {
+		s.sessMu.Lock()
+		delete(s.sessions, token)
+		s.sessMu.Unlock()
+		return false
+	}
+	return true
+}
+
+func (s *Server) deleteSession(token string) {
+	s.sessMu.Lock()
+	delete(s.sessions, token)
+	s.sessMu.Unlock()
+}
+
+func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// If auth is not enabled, pass through
+		if !s.cfg.AuthEnabled() {
+			next(w, r)
+			return
+		}
+
+		// Check for session cookie
+		cookie, err := r.Cookie(sessionCookieName)
+		if err != nil || !s.validateSession(cookie.Value) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// If auth is not enabled, return success
+	if !s.cfg.AuthEnabled() {
+		writeJSON(w, map[string]any{"authenticated": true, "auth_required": false})
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Use constant-time comparison to prevent timing attacks
+	usernameMatch := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AuthUsername)) == 1
+	passwordMatch := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AuthPassword)) == 1
+
+	if !usernameMatch || !passwordMatch {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := s.createSession()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(sessionDuration.Seconds()),
+	})
+
+	writeJSON(w, map[string]any{"authenticated": true})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil {
+		s.deleteSession(cookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+
+	writeJSON(w, map[string]any{"authenticated": false})
+}
+
+func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	// If auth is not enabled, return that auth is not required
+	if !s.cfg.AuthEnabled() {
+		writeJSON(w, map[string]any{"authenticated": true, "auth_required": false})
+		return
+	}
+
+	// Check for valid session
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil || !s.validateSession(cookie.Value) {
+		writeJSON(w, map[string]any{"authenticated": false, "auth_required": true})
+		return
+	}
+
+	writeJSON(w, map[string]any{"authenticated": true, "auth_required": true})
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {

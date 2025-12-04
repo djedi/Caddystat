@@ -20,6 +20,8 @@ type Config struct {
 	RawRetentionHours       int
 	AggregationInterval     time.Duration
 	AggregationFlushSeconds int
+	AuthUsername            string
+	AuthPassword            string
 }
 
 func Load() Config {
@@ -35,9 +37,16 @@ func Load() Config {
 		RawRetentionHours:       getEnvInt("RAW_RETENTION_HOURS", 48),
 		AggregationInterval:     getEnvDuration("AGGREGATION_INTERVAL", time.Hour),
 		AggregationFlushSeconds: getEnvInt("AGGREGATION_FLUSH_SECONDS", 10),
+		AuthUsername:            os.Getenv("AUTH_USERNAME"),
+		AuthPassword:            os.Getenv("AUTH_PASSWORD"),
 	}
 
 	return cfg
+}
+
+// AuthEnabled returns true if both AUTH_USERNAME and AUTH_PASSWORD are set.
+func (c Config) AuthEnabled() bool {
+	return c.AuthUsername != "" && c.AuthPassword != ""
 }
 
 func splitEnv(key string, def []string) []string {

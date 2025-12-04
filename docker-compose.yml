@@ -33,6 +33,8 @@ services:
       - DATA_RETENTION_DAYS=830
       - MAXMIND_DB_PATH=/maxmind/GeoLite2-City.mmdb
       - CHOKIDAR_USEPOLLING=1
+      - AUTH_USERNAME=${AUTH_USERNAME:-}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
     volumes:
       - caddy_logs:/var/log/caddy
       - caddystat_data:/data
