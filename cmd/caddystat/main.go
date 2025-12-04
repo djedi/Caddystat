@@ -21,6 +21,7 @@ import (
 
 func main() {
 	versionFlag := flag.Bool("version", false, "Print version information and exit")
+	healthcheckFlag := flag.Bool("healthcheck", false, "Check health endpoint and exit with status")
 	flag.Parse()
 
 	if *versionFlag {
@@ -29,6 +30,21 @@ func main() {
 	}
 
 	cfg := config.Load()
+
+	if *healthcheckFlag {
+		url := fmt.Sprintf("http://localhost%s/health", cfg.ListenAddr)
+		resp, err := http.Get(url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "health check failed: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			fmt.Fprintf(os.Stderr, "health check failed: status %d\n", resp.StatusCode)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	store, err := storage.New(cfg.DBPath)
 	if err != nil {

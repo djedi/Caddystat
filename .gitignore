@@ -8,11 +8,16 @@
 *.out
 vendor/
 
-# IDE
+# IDE and editors
 .idea/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+*.iml
 
 # Environment & secrets
 .env

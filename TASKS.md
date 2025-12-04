@@ -217,14 +217,14 @@ These are small improvements that provide immediate value:
 
 - [x] Add version number to startup log and `/health` endpoint
 - [x] Add `--version` flag to CLI
-- [ ] Add favicon to web UI
+- [x] Add favicon to web UI
 - [ ] Add "last updated" timestamp to dashboard
-- [ ] Fix inconsistent port documentation (8404 vs 8000)
+- [x] Fix inconsistent port documentation (8404 vs 8000)
 - [x] Add `robots.txt` to prevent search engine indexing of dashboard
 - [x] Add `X-Robots-Tag: noindex` header to all responses
 - [ ] Document all environment variables in README
-- [ ] Add `.gitignore` entries for common editor files
-- [ ] Add Docker health check in Dockerfile
+- [x] Add `.gitignore` entries for common editor files
+- [x] Add Docker health check in Dockerfile
 
 ---
 
@@ -267,10 +267,10 @@ Items that should be addressed for long-term maintainability:
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
 | Nice-to-Have             | 21      | 0         | 0%         |
-| Quick Wins               | 10      | 4         | 40%        |
+| Quick Wins               | 10      | 8         | 80%        |
 | Bug Fixes                | 8       | 0         | 0%         |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **5**     | **4%**     |
+| **Total**                | **118** | **9**     | **8%**     |
 
 ---
 

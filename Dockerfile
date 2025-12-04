@@ -16,5 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/caddystat ./cmd/caddystat
 FROM gcr.io/distroless/base-debian12
 COPY --from=backend /bin/caddystat /bin/caddystat
 COPY --from=backend /app/web/_site /web/_site
-EXPOSE 8000
+EXPOSE 8404
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["/bin/caddystat", "--healthcheck"]
 ENTRYPOINT ["/bin/caddystat"]
