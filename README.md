@@ -65,6 +65,13 @@ Both `AUTH_USERNAME` and `AUTH_PASSWORD` must be set to enable authentication.
 | ----------- | ------- | ------------------------------------------- |
 | `LOG_LEVEL` | `INFO`  | Log level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
 
+### Security
+
+| Variable                 | Default   | Description                                     |
+| ------------------------ | --------- | ----------------------------------------------- |
+| `RATE_LIMIT_PER_MINUTE`  | `0`       | Max requests per minute per IP (0 = disabled)   |
+| `MAX_REQUEST_BODY_BYTES` | `1048576` | Maximum request body size in bytes (1MB default)|
+
 ### Advanced
 
 | Variable                    | Default | Description                       |

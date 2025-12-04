@@ -46,6 +46,8 @@ cd web && npm run dev
 - `MAXMIND_DB_PATH` - Optional path to GeoLite2-City.mmdb for geo lookups
 - `AUTH_USERNAME` - Optional username for dashboard authentication
 - `AUTH_PASSWORD` - Optional password for dashboard authentication (both must be set to enable auth)
+- `RATE_LIMIT_PER_MINUTE` - Max requests per minute per IP (default: `0` = disabled)
+- `MAX_REQUEST_BODY_BYTES` - Maximum request body size in bytes (default: `1048576` = 1MB)
 
 ## Architecture
 

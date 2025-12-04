@@ -25,6 +25,8 @@ type Config struct {
 	AuthUsername            string
 	AuthPassword            string
 	LogLevel                logging.Level
+	RateLimitPerMinute      int
+	MaxRequestBodyBytes     int64
 }
 
 func Load() Config {
@@ -43,9 +45,24 @@ func Load() Config {
 		AuthUsername:            os.Getenv("AUTH_USERNAME"),
 		AuthPassword:            os.Getenv("AUTH_PASSWORD"),
 		LogLevel:                logging.ParseLevel(getEnv("LOG_LEVEL", "INFO")),
+		RateLimitPerMinute:      getEnvInt("RATE_LIMIT_PER_MINUTE", 0),
+		MaxRequestBodyBytes:     getEnvInt64("MAX_REQUEST_BODY_BYTES", 1<<20), // 1MB default
 	}
 
 	return cfg
+}
+
+func getEnvInt64(key string, def int64) int64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return def
+	}
+	parsed, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		slog.Warn("invalid int64 environment variable", "key", key, "value", val, "error", err)
+		return def
+	}
+	return parsed
 }
 
 // AuthEnabled returns true if both AUTH_USERNAME and AUTH_PASSWORD are set.

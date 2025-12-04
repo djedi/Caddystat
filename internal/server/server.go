@@ -19,18 +19,20 @@ import (
 )
 
 type Server struct {
-	store *storage.Storage
-	hub   *sse.Hub
-	mux   *http.ServeMux
-	cfg   config.Config
+	store       *storage.Storage
+	hub         *sse.Hub
+	mux         *http.ServeMux
+	cfg         config.Config
+	rateLimiter *RateLimiter
 }
 
 func New(store *storage.Storage, hub *sse.Hub, cfg config.Config) *Server {
 	s := &Server{
-		store: store,
-		hub:   hub,
-		mux:   http.NewServeMux(),
-		cfg:   cfg,
+		store:       store,
+		hub:         hub,
+		mux:         http.NewServeMux(),
+		cfg:         cfg,
+		rateLimiter: NewRateLimiter(cfg.RateLimitPerMinute, time.Minute),
 	}
 	s.routes()
 	return s
@@ -67,6 +69,26 @@ func (s *Server) routes() {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Prevent search engine indexing
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+
+	// Apply rate limiting
+	if s.rateLimiter.enabled {
+		ip := extractIP(r)
+		if !s.rateLimiter.Allow(ip) {
+			slog.Debug("rate limit exceeded", "ip", ip, "path", r.URL.Path)
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	// Apply body size limit
+	if s.cfg.MaxRequestBodyBytes > 0 && r.ContentLength > s.cfg.MaxRequestBodyBytes {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if s.cfg.MaxRequestBodyBytes > 0 && r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestBodyBytes)
+	}
+
 	s.mux.ServeHTTP(w, r)
 }
 

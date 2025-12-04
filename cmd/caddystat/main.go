@@ -155,5 +155,11 @@ func printStartupBanner(cfg config.Config) {
 	if cfg.AuthEnabled() {
 		fmt.Printf("  Auth:           enabled\n")
 	}
+	if cfg.RateLimitPerMinute > 0 {
+		fmt.Printf("  Rate Limit:     %d req/min per IP\n", cfg.RateLimitPerMinute)
+	}
+	if cfg.MaxRequestBodyBytes > 0 {
+		fmt.Printf("  Max Body Size:  %d bytes\n", cfg.MaxRequestBodyBytes)
+	}
 	fmt.Println()
 }
