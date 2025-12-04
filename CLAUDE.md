@@ -26,6 +26,14 @@ cd web && npm install && npm run build   # outputs to web/_site
 
 # Frontend dev with hot reload (from web/ directory)
 cd web && npm run dev
+
+# Run tests
+./test                    # Run all tests
+./test --coverage         # Show coverage summary
+./test --report           # Generate HTML coverage report and open in browser
+./test --verbose --race   # Verbose output with race detection
+./test --watch            # Re-run tests on file changes
+./test ./internal/ingest  # Test specific package
 ```
 
 ## Environment Variables

@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+#
+# test - Run unit tests with optional coverage reporting
+#
+# Usage:
+#   ./test              Run all tests
+#   ./test --report     Run tests and open HTML coverage report
+#   ./test --coverage   Run tests and show coverage summary
+#   ./test --verbose    Run tests with verbose output
+#   ./test --race       Run tests with race detector
+#   ./test --watch      Watch for changes and re-run tests
+#   ./test --bench      Run benchmarks
+#   ./test --short      Run only short tests (skip slow tests)
+#   ./test <package>    Run tests for specific package (e.g., ./test ./internal/ingest/...)
+#
+# Options can be combined: ./test --verbose --race --coverage
+#
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# Default values
+REPORT=false
+COVERAGE=false
+VERBOSE=false
+RACE=false
+WATCH=false
+BENCH=false
+SHORT=false
+PACKAGE="./..."
+COVERAGE_FILE="coverage.out"
+COVERAGE_HTML="coverage.html"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --report)
+            REPORT=true
+            COVERAGE=true
+            shift
+            ;;
+        --coverage|-c)
+            COVERAGE=true
+            shift
+            ;;
+        --verbose|-v)
+            VERBOSE=true
+            shift
+            ;;
+        --race|-r)
+            RACE=true
+            shift
+            ;;
+        --watch|-w)
+            WATCH=true
+            shift
+            ;;
+        --bench|-b)
+            BENCH=true
+            shift
+            ;;
+        --short|-s)
+            SHORT=true
+            shift
+            ;;
+        --help|-h)
+            sed -n '2,/^$/p' "$0" | sed 's/^# //' | sed 's/^#//'
+            exit 0
+            ;;
+        --clean)
+            echo -e "${BLUE}Cleaning coverage files...${NC}"
+            rm -f coverage.out coverage.html
+            echo -e "${GREEN}Done${NC}"
+            exit 0
+            ;;
+        ./*)
+            PACKAGE="$1"
+            shift
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Build test command
+CMD="go test"
+
+if $VERBOSE; then
+    CMD="$CMD -v"
+fi
+
+if $RACE; then
+    CMD="$CMD -race"
+fi
+
+if $SHORT; then
+    CMD="$CMD -short"
+fi
+
+if $COVERAGE; then
+    CMD="$CMD -coverprofile=$COVERAGE_FILE -covermode=atomic"
+fi
+
+if $BENCH; then
+    CMD="$CMD -bench=. -benchmem"
+fi
+
+CMD="$CMD $PACKAGE"
+
+# Function to run tests
+run_tests() {
+    echo -e "${BLUE}${BOLD}Running tests...${NC}"
+    echo -e "${YELLOW}$ $CMD${NC}"
+    echo ""
+
+    START_TIME=$(date +%s)
+
+    if $CMD; then
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        echo ""
+        echo -e "${GREEN}${BOLD}✓ All tests passed${NC} ${BLUE}(${DURATION}s)${NC}"
+
+        # Show coverage summary if enabled
+        if $COVERAGE && [[ -f "$COVERAGE_FILE" ]]; then
+            echo ""
+            echo -e "${BLUE}${BOLD}Coverage Summary:${NC}"
+            go tool cover -func="$COVERAGE_FILE" | tail -1
+
+            # Show per-package coverage
+            echo ""
+            echo -e "${BLUE}Per-package coverage:${NC}"
+            go tool cover -func="$COVERAGE_FILE" | grep "total:" | while read -r line; do
+                echo "  $line"
+            done
+
+            # Extract coverage percentage and colorize
+            TOTAL_COV=$(go tool cover -func="$COVERAGE_FILE" | grep "total:" | awk '{print $3}' | sed 's/%//')
+            if [[ -n "$TOTAL_COV" ]]; then
+                COV_INT=${TOTAL_COV%.*}
+                if [[ $COV_INT -ge 80 ]]; then
+                    echo -e "\n${GREEN}${BOLD}Coverage: ${TOTAL_COV}%${NC} (good)"
+                elif [[ $COV_INT -ge 50 ]]; then
+                    echo -e "\n${YELLOW}${BOLD}Coverage: ${TOTAL_COV}%${NC} (needs improvement)"
+                else
+                    echo -e "\n${RED}${BOLD}Coverage: ${TOTAL_COV}%${NC} (low)"
+                fi
+            fi
+        fi
+
+        # Generate and open HTML report if requested
+        if $REPORT && [[ -f "$COVERAGE_FILE" ]]; then
+            echo ""
+            echo -e "${BLUE}Generating HTML coverage report...${NC}"
+            go tool cover -html="$COVERAGE_FILE" -o "$COVERAGE_HTML"
+            echo -e "${GREEN}Report saved to: $COVERAGE_HTML${NC}"
+
+            # Open in browser (cross-platform)
+            if command -v open &> /dev/null; then
+                open "$COVERAGE_HTML"  # macOS
+            elif command -v xdg-open &> /dev/null; then
+                xdg-open "$COVERAGE_HTML"  # Linux
+            elif command -v start &> /dev/null; then
+                start "$COVERAGE_HTML"  # Windows
+            else
+                echo -e "${YELLOW}Could not open browser. Open $COVERAGE_HTML manually.${NC}"
+            fi
+        fi
+
+        return 0
+    else
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        echo ""
+        echo -e "${RED}${BOLD}✗ Tests failed${NC} ${BLUE}(${DURATION}s)${NC}"
+        return 1
+    fi
+}
+
+# Watch mode using fswatch or entr if available
+if $WATCH; then
+    echo -e "${BLUE}${BOLD}Watch mode enabled${NC}"
+    echo -e "${YELLOW}Watching for changes in .go files...${NC}"
+    echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+    echo ""
+
+    # Run once immediately
+    run_tests || true
+
+    if command -v fswatch &> /dev/null; then
+        fswatch -o --include '\.go$' --exclude '.*' . | while read -r; do
+            echo ""
+            echo -e "${BLUE}─────────────────────────────────────${NC}"
+            echo -e "${YELLOW}Change detected, re-running tests...${NC}"
+            echo ""
+            run_tests || true
+        done
+    elif command -v entr &> /dev/null; then
+        while true; do
+            find . -name "*.go" -not -path "./vendor/*" | entr -d -c "$0" "${@/--watch/}" || true
+        done
+    else
+        echo -e "${RED}Watch mode requires 'fswatch' or 'entr' to be installed${NC}"
+        echo "  macOS: brew install fswatch"
+        echo "  Linux: apt install entr  or  brew install entr"
+        exit 1
+    fi
+else
+    run_tests
+fi

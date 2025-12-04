@@ -64,14 +64,14 @@ services:
     container_name: caddy
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - ./caddy_data:/data
       - ./caddy_config:/config
-      - caddy_logs:/var/log/caddy  # Add this shared volume
+      - caddy_logs:/var/log/caddy # Add this shared volume
 
   caddystat:
     image: xhenxhe/caddystat:latest
@@ -138,7 +138,7 @@ example.com {
 ```yaml
 caddystat:
   ports:
-    - "8000:8000"
+    - '8000:8000'
 ```
 
 **Option B: Proxy through Caddy (recommended for HTTPS)**
@@ -183,8 +183,26 @@ The Go server serves `web/_site` at `/`.
 
 - Run API locally: `go run ./cmd/caddystat`.
 - Build frontend: `cd web && npm install && npm run build`.
-- Run tests: `go test ./...`.
 - Document new env vars or flags when adding features.
+
+### Testing
+
+Use the `./test` script to run tests:
+
+| Flag               | Description                                                 |
+| ------------------ | ----------------------------------------------------------- |
+| `--report`         | Generate HTML coverage report and open in browser           |
+| `--coverage`, `-c` | Show coverage summary in terminal                           |
+| `--verbose`, `-v`  | Verbose test output                                         |
+| `--race`, `-r`     | Enable race detector                                        |
+| `--watch`, `-w`    | Re-run tests on file changes (requires `fswatch` or `entr`) |
+| `--bench`, `-b`    | Run benchmarks with memory stats                            |
+| `--short`, `-s`    | Skip slow tests                                             |
+| `--clean`          | Remove coverage files                                       |
+
+Options can be combined: `./test --verbose --race --coverage`
+
+Target specific packages: `./test ./internal/ingest/...`
 
 ## Contributing and support
 

@@ -37,7 +37,12 @@ Read the task list from `TASKS.md` and complete the next uncompleted task.
    - Update the Progress Tracking table with new counts and percentages
    - If you discovered new tasks during implementation, add them to the appropriate section
 
-7. **Provide a summary**:
+7. **Update Documentation**:
+
+   - If relevant, update README.md
+   - If relevant, update CLAUDE.md
+
+8. **Provide a summary**:
    - List which task(s) were completed
    - Describe what was implemented
    - Note any new files created or modified

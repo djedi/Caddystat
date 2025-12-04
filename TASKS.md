@@ -8,7 +8,7 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### Testing
 
-- [ ] Add unit tests for `internal/ingest` - test log parsing with various Caddy JSON formats
+- [x] Add unit tests for `internal/ingest` - test log parsing with various Caddy JSON formats
 - [ ] Add unit tests for `internal/useragent` - test browser/OS/bot detection
 - [ ] Add unit tests for `internal/storage` - test database operations and rollup logic
 - [ ] Add integration tests for API endpoints
@@ -262,7 +262,7 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 17      | 5         | 29%        |
+| Security & Stability     | 17      | 6         | 35%        |
 | Performance & Operations | 16      | 0         | 0%         |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
@@ -270,7 +270,7 @@ Items that should be addressed for long-term maintainability:
 | Quick Wins               | 10      | 9         | 90%        |
 | Bug Fixes                | 8       | 0         | 0%         |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **14**    | **12%**    |
+| **Total**                | **118** | **15**    | **13%**    |
 
 ---
 

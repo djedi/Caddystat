@@ -51,6 +51,7 @@ Thumbs.db
 
 # Test coverage
 coverage/
+coverage.html
 *.cover
 *.coverage
 
