@@ -799,6 +799,12 @@
     </div>
 
     <script>
+      // Get CSRF token from cookie
+      function getCSRFToken() {
+        const match = document.cookie.match(/(?:^|; )caddystat_csrf=([^;]*)/);
+        return match ? decodeURIComponent(match[1]) : '';
+      }
+
       // Auth Manager - handles authentication state
       function authManager() {
         return {
@@ -837,7 +843,10 @@
             try {
               const res = await fetch('/api/auth/login', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-CSRF-Token': getCSRFToken()
+                },
                 body: JSON.stringify({
                   username: this.loginUsername,
                   password: this.loginPassword
@@ -859,7 +868,10 @@
 
           async logout() {
             try {
-              await fetch('/api/auth/logout', { method: 'POST' });
+              await fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getCSRFToken() }
+              });
             } catch (err) {
               console.error('Logout failed:', err);
             }

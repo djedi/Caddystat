@@ -43,9 +43,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/robots.txt", s.handleRobotsTxt)
 
-	// Auth endpoints (always accessible)
-	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
-	s.mux.HandleFunc("/api/auth/logout", s.handleLogout)
+	// Auth endpoints (always accessible, POST endpoints require CSRF)
+	s.mux.HandleFunc("/api/auth/login", s.requireCSRF(s.handleLogin))
+	s.mux.HandleFunc("/api/auth/logout", s.requireCSRF(s.handleLogout))
 	s.mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 
 	// Protected API endpoints
@@ -69,6 +69,14 @@ func (s *Server) routes() {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Prevent search engine indexing
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+
+	// Set security headers (CSP, X-Frame-Options, etc.)
+	setSecurityHeaders(w)
+
+	// Ensure CSRF cookie is set for all requests
+	if _, err := ensureCSRFCookie(w, r); err != nil {
+		slog.Warn("failed to set CSRF cookie", "error", err)
+	}
 
 	// Apply rate limiting
 	if s.rateLimiter.enabled {

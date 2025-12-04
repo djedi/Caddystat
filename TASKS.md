@@ -26,8 +26,8 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 - [x] Add rate limiting middleware (per-IP, configurable via env)
 - [x] Add request size limits to prevent DoS
-- [ ] Add CSRF protection for POST endpoints
-- [ ] Add Content Security Policy headers
+- [x] Add CSRF protection for POST endpoints
+- [x] Add Content Security Policy headers
 - [x] Implement persistent session storage (SQLite-backed instead of in-memory)
 - [x] Add session cleanup job for expired sessions
 - [ ] Remove `.env.sample` from repo or ensure no real credentials
@@ -262,7 +262,7 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 17      | 12        | 71%        |
+| Security & Stability     | 17      | 14        | 82%        |
 | Performance & Operations | 16      | 0         | 0%         |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
@@ -270,7 +270,7 @@ Items that should be addressed for long-term maintainability:
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **23**    | **19%**    |
+| **Total**                | **118** | **25**    | **21%**    |
 
 ---
 
