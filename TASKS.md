@@ -9,7 +9,7 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 ### Testing
 
 - [x] Add unit tests for `internal/ingest` - test log parsing with various Caddy JSON formats
-- [ ] Add unit tests for `internal/useragent` - test browser/OS/bot detection
+- [x] Add unit tests for `internal/useragent` - test browser/OS/bot detection
 - [ ] Add unit tests for `internal/storage` - test database operations and rollup logic
 - [ ] Add integration tests for API endpoints
 - [ ] Add test fixtures with sample Caddy logs (plain + gzip)
@@ -222,7 +222,7 @@ These are small improvements that provide immediate value:
 - [x] Fix inconsistent port documentation (8404 vs 8000)
 - [x] Add `robots.txt` to prevent search engine indexing of dashboard
 - [x] Add `X-Robots-Tag: noindex` header to all responses
-- [ ] Document all environment variables in README
+- [x] Document all environment variables in README
 - [x] Add `.gitignore` entries for common editor files
 - [x] Add Docker health check in Dockerfile
 
@@ -262,15 +262,15 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 17      | 6         | 35%        |
+| Security & Stability     | 17      | 7         | 41%        |
 | Performance & Operations | 16      | 0         | 0%         |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
 | Nice-to-Have             | 21      | 0         | 0%         |
-| Quick Wins               | 10      | 9         | 90%        |
+| Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 0         | 0%         |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **15**    | **13%**    |
+| **Total**                | **118** | **17**    | **14%**    |
 
 ---
 

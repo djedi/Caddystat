@@ -15,20 +15,62 @@ Prereqs: Go 1.22+. From the repo root:
 go run ./cmd/caddystat
 ```
 
-Visit `http://localhost:8000/` for the dashboard.
+Visit `http://localhost:8404/` for the dashboard.
 
 ## Configuration
 
-Environment variables:
+All configuration is done via environment variables:
 
-- `LOG_PATH`: Comma-separated Caddy log paths (default `./caddy.log`).
-- `LISTEN_ADDR`: HTTP bind (default `:8000`).
-- `DB_PATH`: SQLite path (default `./data/caddystat.db`).
-- `DATA_RETENTION_DAYS`: Purge raw rows older than N days (default `7`).
-- `RAW_RETENTION_HOURS`: Window used for realtime summaries (default `48`).
-- `MAXMIND_DB_PATH`: Optional path to `GeoLite2-City.mmdb` to enable geo.
-- `PRIVACY_HASH_IPS`: `true|false` to hash IPs with `PRIVACY_HASH_SALT`.
-- `PRIVACY_ANONYMIZE_LAST_OCTET`: `true|false` to zero last IPv4 octet before hashing/storing.
+### Core Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_PATH` | `./caddy.log` | Comma-separated Caddy log paths |
+| `LISTEN_ADDR` | `:8404` | HTTP bind address |
+| `DB_PATH` | `./data/caddystat.db` | SQLite database path |
+
+### Data Retention
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATA_RETENTION_DAYS` | `7` | Purge raw rows older than N days |
+| `RAW_RETENTION_HOURS` | `48` | Window used for realtime summaries |
+
+### GeoIP
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAXMIND_DB_PATH` | _(empty)_ | Path to `GeoLite2-City.mmdb` to enable geo lookups |
+
+### Privacy
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PRIVACY_HASH_IPS` | `false` | Hash IPs before storing |
+| `PRIVACY_HASH_SALT` | `caddystat` | Salt used for IP hashing |
+| `PRIVACY_ANONYMIZE_LAST_OCTET` | `false` | Zero last IPv4 octet before hashing/storing |
+
+### Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_USERNAME` | _(empty)_ | Username for dashboard authentication |
+| `AUTH_PASSWORD` | _(empty)_ | Password for dashboard authentication |
+
+Both `AUTH_USERNAME` and `AUTH_PASSWORD` must be set to enable authentication.
+
+### Logging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
+
+### Advanced
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGGREGATION_INTERVAL` | `1h` | Duration between aggregation runs |
+| `AGGREGATION_FLUSH_SECONDS` | `10` | Seconds between flush writes |
 
 ## Docker Compose (Development)
 
