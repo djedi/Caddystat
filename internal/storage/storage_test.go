@@ -961,3 +961,175 @@ func TestStorage_ReferrerTypes(t *testing.T) {
 		t.Errorf("direct referrers = %d, want 1", typeCount["direct"])
 	}
 }
+
+func TestStorage_CreateSession(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	token := "test-session-token"
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	if err := s.CreateSession(ctx, token, expiresAt); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Verify session exists
+	sess, err := s.GetSession(ctx, token)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if sess == nil {
+		t.Fatal("expected session, got nil")
+	}
+	if sess.Token != token {
+		t.Errorf("Token = %q, want %q", sess.Token, token)
+	}
+	// Check expiry is within 1 second of what we set (to account for time drift)
+	if sess.ExpiresAt.Sub(expiresAt) > time.Second || expiresAt.Sub(sess.ExpiresAt) > time.Second {
+		t.Errorf("ExpiresAt = %v, want %v", sess.ExpiresAt, expiresAt)
+	}
+}
+
+func TestStorage_GetSession_NotFound(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	sess, err := s.GetSession(ctx, "nonexistent-token")
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if sess != nil {
+		t.Errorf("expected nil session for nonexistent token, got %+v", sess)
+	}
+}
+
+func TestStorage_DeleteSession(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	token := "test-session-token"
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	// Create session
+	if err := s.CreateSession(ctx, token, expiresAt); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Delete session
+	if err := s.DeleteSession(ctx, token); err != nil {
+		t.Fatalf("DeleteSession() error = %v", err)
+	}
+
+	// Verify session is gone
+	sess, err := s.GetSession(ctx, token)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if sess != nil {
+		t.Errorf("expected nil session after delete, got %+v", sess)
+	}
+}
+
+func TestStorage_DeleteSession_NotFound(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Deleting nonexistent session should not error
+	if err := s.DeleteSession(ctx, "nonexistent-token"); err != nil {
+		t.Errorf("DeleteSession() error = %v, want nil", err)
+	}
+}
+
+func TestStorage_CleanupExpiredSessions(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create expired session
+	expiredToken := "expired-session"
+	if err := s.CreateSession(ctx, expiredToken, time.Now().Add(-1*time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Create valid session
+	validToken := "valid-session"
+	if err := s.CreateSession(ctx, validToken, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Cleanup expired sessions
+	deleted, err := s.CleanupExpiredSessions(ctx)
+	if err != nil {
+		t.Fatalf("CleanupExpiredSessions() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("CleanupExpiredSessions() deleted = %d, want 1", deleted)
+	}
+
+	// Verify expired session is gone
+	sess, err := s.GetSession(ctx, expiredToken)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if sess != nil {
+		t.Error("expected expired session to be deleted")
+	}
+
+	// Verify valid session still exists
+	sess, err = s.GetSession(ctx, validToken)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if sess == nil {
+		t.Error("expected valid session to still exist")
+	}
+}
+
+func TestStorage_CleanupExpiredSessions_NoExpired(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create only valid sessions
+	if err := s.CreateSession(ctx, "session1", time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := s.CreateSession(ctx, "session2", time.Now().Add(48*time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	deleted, err := s.CleanupExpiredSessions(ctx)
+	if err != nil {
+		t.Fatalf("CleanupExpiredSessions() error = %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("CleanupExpiredSessions() deleted = %d, want 0", deleted)
+	}
+}
+
+func TestStorage_CreateSession_DuplicateToken(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	token := "duplicate-token"
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	if err := s.CreateSession(ctx, token, expiresAt); err != nil {
+		t.Fatalf("CreateSession() first call error = %v", err)
+	}
+
+	// Second creation with same token should fail (unique constraint)
+	err := s.CreateSession(ctx, token, expiresAt)
+	if err == nil {
+		t.Error("expected error on duplicate token, got nil")
+	}
+}

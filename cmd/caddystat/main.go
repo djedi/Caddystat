@@ -83,16 +83,25 @@ func main() {
 	}
 
 	go func() {
-		ticker := time.NewTicker(12 * time.Hour)
-		defer ticker.Stop()
+		dataTicker := time.NewTicker(12 * time.Hour)
+		sessionTicker := time.NewTicker(1 * time.Hour)
+		defer dataTicker.Stop()
+		defer sessionTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-dataTicker.C:
 				slog.Debug("running data cleanup", "retention_days", cfg.DataRetentionDays)
 				if err := store.Cleanup(context.Background(), cfg.DataRetentionDays); err != nil {
 					slog.Warn("data cleanup failed", "error", err)
+				}
+			case <-sessionTicker.C:
+				slog.Debug("running session cleanup")
+				if deleted, err := store.CleanupExpiredSessions(context.Background()); err != nil {
+					slog.Warn("session cleanup failed", "error", err)
+				} else if deleted > 0 {
+					slog.Debug("cleaned up expired sessions", "count", deleted)
 				}
 			}
 		}

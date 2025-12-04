@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -9,7 +10,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/dustin/Caddystat/internal/config"
@@ -19,21 +19,18 @@ import (
 )
 
 type Server struct {
-	store    *storage.Storage
-	hub      *sse.Hub
-	mux      *http.ServeMux
-	cfg      config.Config
-	sessions map[string]time.Time
-	sessMu   sync.RWMutex
+	store *storage.Storage
+	hub   *sse.Hub
+	mux   *http.ServeMux
+	cfg   config.Config
 }
 
 func New(store *storage.Storage, hub *sse.Hub, cfg config.Config) *Server {
 	s := &Server{
-		store:    store,
-		hub:      hub,
-		mux:      http.NewServeMux(),
-		cfg:      cfg,
-		sessions: make(map[string]time.Time),
+		store: store,
+		hub:   hub,
+		mux:   http.NewServeMux(),
+		cfg:   cfg,
 	}
 	s.routes()
 	return s
@@ -112,37 +109,41 @@ func (s *Server) generateSessionToken() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func (s *Server) createSession() (string, error) {
+func (s *Server) createSession(ctx context.Context) (string, error) {
 	token, err := s.generateSessionToken()
 	if err != nil {
 		return "", err
 	}
-	s.sessMu.Lock()
-	s.sessions[token] = time.Now().Add(sessionDuration)
-	s.sessMu.Unlock()
+	expiresAt := time.Now().Add(sessionDuration)
+	if err := s.store.CreateSession(ctx, token, expiresAt); err != nil {
+		return "", err
+	}
 	return token, nil
 }
 
-func (s *Server) validateSession(token string) bool {
-	s.sessMu.RLock()
-	expiry, exists := s.sessions[token]
-	s.sessMu.RUnlock()
-	if !exists {
+func (s *Server) validateSession(ctx context.Context, token string) bool {
+	sess, err := s.store.GetSession(ctx, token)
+	if err != nil {
+		slog.Warn("failed to get session", "error", err)
 		return false
 	}
-	if time.Now().After(expiry) {
-		s.sessMu.Lock()
-		delete(s.sessions, token)
-		s.sessMu.Unlock()
+	if sess == nil {
+		return false
+	}
+	if time.Now().After(sess.ExpiresAt) {
+		// Clean up expired session
+		if err := s.store.DeleteSession(ctx, token); err != nil {
+			slog.Warn("failed to delete expired session", "error", err)
+		}
 		return false
 	}
 	return true
 }
 
-func (s *Server) deleteSession(token string) {
-	s.sessMu.Lock()
-	delete(s.sessions, token)
-	s.sessMu.Unlock()
+func (s *Server) deleteSession(ctx context.Context, token string) {
+	if err := s.store.DeleteSession(ctx, token); err != nil {
+		slog.Warn("failed to delete session", "error", err)
+	}
 }
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -155,7 +156,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		// Check for session cookie
 		cookie, err := r.Cookie(sessionCookieName)
-		if err != nil || !s.validateSession(cookie.Value) {
+		if err != nil || !s.validateSession(r.Context(), cookie.Value) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -193,7 +194,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.createSession()
+	token, err := s.createSession(r.Context())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -219,7 +220,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil {
-		s.deleteSession(cookie.Value)
+		s.deleteSession(r.Context(), cookie.Value)
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -243,7 +244,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 
 	// Check for valid session
 	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil || !s.validateSession(cookie.Value) {
+	if err != nil || !s.validateSession(r.Context(), cookie.Value) {
 		writeJSON(w, map[string]any{"authenticated": false, "auth_required": true})
 		return
 	}

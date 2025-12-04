@@ -28,8 +28,8 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 - [ ] Add request size limits to prevent DoS
 - [ ] Add CSRF protection for POST endpoints
 - [ ] Add Content Security Policy headers
-- [ ] Implement persistent session storage (SQLite-backed instead of in-memory)
-- [ ] Add session cleanup job for expired sessions
+- [x] Implement persistent session storage (SQLite-backed instead of in-memory)
+- [x] Add session cleanup job for expired sessions
 - [ ] Remove `.env.sample` from repo or ensure no real credentials
 
 ### Health & Operations
@@ -232,7 +232,7 @@ These are small improvements that provide immediate value:
 
 Known issues to address:
 
-- [ ] Sessions lost on container restart (implement persistent sessions)
+- [x] Sessions lost on container restart (implement persistent sessions)
 - [ ] Import progress only saved every 10,000 rows (reduce to 1,000)
 - [ ] `ListenAddr` default mismatch between config (`:8404`) and docs (`:8000`)
 - [ ] Timezone handling: ensure frontend displays times correctly
@@ -262,15 +262,15 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 17      | 8         | 47%        |
+| Security & Stability     | 17      | 10        | 59%        |
 | Performance & Operations | 16      | 0         | 0%         |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
 | Nice-to-Have             | 21      | 0         | 0%         |
 | Quick Wins               | 10      | 10        | 100%       |
-| Bug Fixes                | 8       | 0         | 0%         |
+| Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **18**    | **15%**    |
+| **Total**                | **118** | **21**    | **18%**    |
 
 ---
 

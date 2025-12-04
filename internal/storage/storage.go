@@ -239,6 +239,13 @@ CREATE TABLE IF NOT EXISTS import_progress (
 	file_mtime INTEGER NOT NULL,
 	updated_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sessions (
+	token TEXT PRIMARY KEY,
+	expires_at TIMESTAMP NOT NULL,
+	created_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -1278,4 +1285,74 @@ FROM requests`
 // Ping checks database connectivity by executing a simple query.
 func (s *Storage) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
+}
+
+// Session represents a user authentication session.
+type Session struct {
+	Token     string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+// CreateSession stores a new session in the database.
+func (s *Storage) CreateSession(ctx context.Context, token string, expiresAt time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO sessions (token, expires_at, created_at) VALUES (?, ?, ?)`,
+		token, expiresAt, time.Now().UTC())
+	return err
+}
+
+// GetSession retrieves a session by token.
+// Returns nil if the session doesn't exist.
+func (s *Storage) GetSession(ctx context.Context, token string) (*Session, error) {
+	var sess Session
+	var expiresStr, createdStr string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT token, expires_at, created_at FROM sessions WHERE token = ?`,
+		token).Scan(&sess.Token, &expiresStr, &createdStr)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	sess.ExpiresAt, _ = time.Parse("2006-01-02 15:04:05.999999999-07:00", expiresStr)
+	if sess.ExpiresAt.IsZero() {
+		sess.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresStr)
+	}
+	sess.CreatedAt, _ = time.Parse("2006-01-02 15:04:05.999999999-07:00", createdStr)
+	if sess.CreatedAt.IsZero() {
+		sess.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
+	}
+
+	return &sess, nil
+}
+
+// DeleteSession removes a session from the database.
+func (s *Storage) DeleteSession(ctx context.Context, token string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
+	return err
+}
+
+// CleanupExpiredSessions removes all sessions that have expired.
+// Returns the number of sessions deleted.
+func (s *Storage) CleanupExpiredSessions(ctx context.Context) (int64, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM sessions WHERE expires_at < ?`,
+		time.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
