@@ -12,23 +12,57 @@ type Event struct {
 type Hub struct {
 	mu      sync.Mutex
 	clients map[chan Event]struct{}
+	closed  bool
 }
 
 func NewHub() *Hub {
 	return &Hub{clients: make(map[chan Event]struct{})}
 }
 
-// Subscribe returns a channel for events and a cleanup function.
-func (h *Hub) Subscribe() (<-chan Event, func()) {
-	ch := make(chan Event, 10)
+// Close closes all client connections and prevents new subscriptions.
+// It returns the number of clients that were disconnected.
+func (h *Hub) Close() int {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.closed {
+		return 0
+	}
+	h.closed = true
+
+	count := len(h.clients)
+	for ch := range h.clients {
+		close(ch)
+		delete(h.clients, ch)
+	}
+	return count
+}
+
+// ClientCount returns the current number of connected clients.
+func (h *Hub) ClientCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.clients)
+}
+
+// Subscribe returns a channel for events and a cleanup function.
+// Returns nil, nil if the hub has been closed.
+func (h *Hub) Subscribe() (<-chan Event, func()) {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil, nil
+	}
+	ch := make(chan Event, 10)
 	h.clients[ch] = struct{}{}
 	h.mu.Unlock()
 	return ch, func() {
 		h.mu.Lock()
-		delete(h.clients, ch)
-		close(ch)
-		h.mu.Unlock()
+		defer h.mu.Unlock()
+		if _, ok := h.clients[ch]; ok {
+			delete(h.clients, ch)
+			close(ch)
+		}
 	}
 }
 

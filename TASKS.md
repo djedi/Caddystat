@@ -36,8 +36,8 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 - [x] Add `GET /health` endpoint (returns DB connectivity status)
 - [ ] Add `GET /api/stats/status` endpoint (DB size, row counts, last import time)
-- [ ] Implement graceful shutdown (close SSE connections, flush pending writes)
-- [ ] Add SIGTERM/SIGINT handler with cleanup
+- [x] Implement graceful shutdown (close SSE connections, flush pending writes)
+- [x] Add SIGTERM/SIGINT handler with cleanup
 
 ---
 
@@ -262,7 +262,7 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 17      | 16        | 94%        |
+| Security & Stability     | 21      | 18        | 86%        |
 | Performance & Operations | 16      | 0         | 0%         |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
@@ -270,7 +270,7 @@ Items that should be addressed for long-term maintainability:
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **27**    | **23%**    |
+| **Total**                | **122** | **29**    | **24%**    |
 
 ---
 

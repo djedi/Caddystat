@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hpcloud/tail"
@@ -26,10 +27,12 @@ import (
 )
 
 type Ingestor struct {
-	cfg   config.Config
-	store *storage.Storage
-	hub   *sse.Hub
-	geo   *GeoLookup
+	cfg    config.Config
+	store  *storage.Storage
+	hub    *sse.Hub
+	geo    *GeoLookup
+	wg     sync.WaitGroup
+	cancel context.CancelFunc
 }
 
 func New(cfg config.Config, store *storage.Storage, hub *sse.Hub, geo *GeoLookup) *Ingestor {
@@ -42,6 +45,10 @@ func New(cfg config.Config, store *storage.Storage, hub *sse.Hub, geo *GeoLookup
 }
 
 func (i *Ingestor) Start(ctx context.Context) error {
+	// Create a derived context that we can cancel on Stop()
+	tailCtx, cancel := context.WithCancel(ctx)
+	i.cancel = cancel
+
 	// First, import any existing log files (including rotated/gzipped ones)
 	for _, path := range i.cfg.LogPaths {
 		if err := i.importHistoricalLogs(ctx, path); err != nil {
@@ -51,9 +58,22 @@ func (i *Ingestor) Start(ctx context.Context) error {
 
 	// Then start tailing for new entries
 	for _, path := range i.cfg.LogPaths {
-		go i.tailFile(ctx, path)
+		i.wg.Add(1)
+		go func(p string) {
+			defer i.wg.Done()
+			i.tailFile(tailCtx, p)
+		}(path)
 	}
 	return nil
+}
+
+// Stop gracefully stops all log tailing goroutines and waits for them to finish.
+func (i *Ingestor) Stop() {
+	if i.cancel != nil {
+		i.cancel()
+	}
+	// Wait for all tail goroutines to finish
+	i.wg.Wait()
 }
 
 // importHistoricalLogs reads existing log files including rotated ones
@@ -386,6 +406,14 @@ func NewGeo(path string) (*GeoLookup, error) {
 		return nil, err
 	}
 	return &GeoLookup{db: db}, nil
+}
+
+// Close closes the MaxMind database reader.
+func (g *GeoLookup) Close() error {
+	if g == nil || g.db == nil {
+		return nil
+	}
+	return g.db.Close()
 }
 
 func (g *GeoLookup) Lookup(ip string) (string, string, string) {

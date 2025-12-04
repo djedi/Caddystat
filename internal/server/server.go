@@ -456,6 +456,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	dur := parseRange(r.URL.Query().Get("range"), 24*time.Hour)
 
 	ch, cancel := s.hub.Subscribe()
+	if ch == nil {
+		// Hub is closed (server shutting down)
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	defer cancel()
 
 	// Send an initial snapshot.

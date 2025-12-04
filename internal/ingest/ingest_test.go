@@ -574,3 +574,27 @@ func TestParseCaddyLog_URIWithSpecialChars(t *testing.T) {
 		})
 	}
 }
+
+func TestIngestor_StopBeforeStart(t *testing.T) {
+	// Stop should not panic if called before Start
+	ingestor := &Ingestor{}
+	ingestor.Stop() // Should not panic
+}
+
+func TestGeoLookup_CloseNil(t *testing.T) {
+	// Close on nil GeoLookup should not panic
+	var g *GeoLookup
+	err := g.Close()
+	if err != nil {
+		t.Errorf("Close() = %v, want nil", err)
+	}
+}
+
+func TestGeoLookup_CloseNilDB(t *testing.T) {
+	// Close with nil db should not panic
+	g := &GeoLookup{db: nil}
+	err := g.Close()
+	if err != nil {
+		t.Errorf("Close() = %v, want nil", err)
+	}
+}

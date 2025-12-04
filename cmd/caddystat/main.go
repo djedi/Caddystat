@@ -121,12 +121,39 @@ func main() {
 	}()
 
 	<-ctx.Done()
-	slog.Info("shutting down...")
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	slog.Info("received shutdown signal, starting graceful shutdown...")
+
+	// Create a timeout context for the entire shutdown sequence
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShutdown()
-	_ = srv.Shutdown(shutdownCtx)
+
+	// 1. Stop accepting new SSE connections and close existing ones
+	sseClients := hub.Close()
+	slog.Debug("closed SSE connections", "clients", sseClients)
+
+	// 2. Shutdown HTTP server (stops accepting new requests, waits for in-flight)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Warn("HTTP server shutdown error", "error", err)
+	} else {
+		slog.Debug("HTTP server stopped")
+	}
+
+	// 3. Stop log tailing goroutines
+	ingestor.Stop()
+	slog.Debug("stopped log tailers")
+
+	// 4. Close GeoIP database if configured
+	if geo != nil {
+		if err := geo.Close(); err != nil {
+			slog.Warn("failed to close GeoIP database", "error", err)
+		} else {
+			slog.Debug("closed GeoIP database")
+		}
+	}
+
+	// 5. Database is closed via defer store.Close() above
+
 	slog.Info("shutdown complete")
-	os.Exit(0)
 }
 
 func printStartupBanner(cfg config.Config) {
