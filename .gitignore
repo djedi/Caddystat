@@ -51,3 +51,6 @@ coverage/
 
 # Scripts
 update_redseam.sh
+
+# Binary
+caddystat

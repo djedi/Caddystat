@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMPOSE_FILE="docker-compose.dev.yml"
+PROJECT_NAME="caddystat-dev"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+usage() {
+    echo -e "${BLUE}Caddystat Development Script${NC}"
+    echo ""
+    echo "Usage: $0 [command] [options]"
+    echo ""
+    echo "Commands:"
+    echo "  up, start      Start containers (default)"
+    echo "  down, stop     Stop and remove containers"
+    echo "  restart        Restart containers"
+    echo "  rebuild        Rebuild and restart containers"
+    echo "  logs           Follow container logs"
+    echo "  ps, status     Show container status"
+    echo "  shell [svc]    Open shell in container (default: caddystat)"
+    echo "  clean          Stop containers and remove volumes"
+    echo "  build          Build images without starting"
+    echo ""
+    echo "Options:"
+    echo "  -d, --detach   Run in detached mode (for up/start/restart)"
+    echo "  -h, --help     Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0              # Start in foreground"
+    echo "  $0 up -d        # Start in background"
+    echo "  $0 logs         # Follow logs"
+    echo "  $0 shell        # Shell into caddystat container"
+    echo "  $0 shell caddy  # Shell into caddy container"
+}
+
+cmd_up() {
+    local detach=""
+    if [[ "${1:-}" == "-d" || "${1:-}" == "--detach" ]]; then
+        detach="-d"
+    fi
+    echo -e "${GREEN}Starting development environment...${NC}"
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up --build $detach
+}
+
+cmd_down() {
+    echo -e "${YELLOW}Stopping development environment...${NC}"
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down
+}
+
+cmd_restart() {
+    local detach=""
+    if [[ "${1:-}" == "-d" || "${1:-}" == "--detach" ]]; then
+        detach="-d"
+    fi
+    echo -e "${YELLOW}Restarting development environment...${NC}"
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up --build $detach
+}
+
+cmd_rebuild() {
+    local detach=""
+    if [[ "${1:-}" == "-d" || "${1:-}" == "--detach" ]]; then
+        detach="-d"
+    fi
+    echo -e "${YELLOW}Rebuilding development environment...${NC}"
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" build --no-cache
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up $detach
+}
+
+cmd_logs() {
+    local service="${1:-}"
+    if [[ -n "$service" ]]; then
+        docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" logs -f "$service"
+    else
+        docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" logs -f
+    fi
+}
+
+cmd_status() {
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" ps
+}
+
+cmd_shell() {
+    local service="${1:-caddystat}"
+    echo -e "${BLUE}Opening shell in $service...${NC}"
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec "$service" /bin/sh
+}
+
+cmd_clean() {
+    echo -e "${RED}Stopping containers and removing volumes...${NC}"
+    read -p "Are you sure? This will delete all data. [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" down -v
+        echo -e "${GREEN}Cleaned up.${NC}"
+    else
+        echo "Aborted."
+    fi
+}
+
+cmd_build() {
+    echo -e "${BLUE}Building images...${NC}"
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" build
+}
+
+# Main
+case "${1:-up}" in
+    up|start)
+        shift || true
+        cmd_up "$@"
+        ;;
+    down|stop)
+        cmd_down
+        ;;
+    restart)
+        shift || true
+        cmd_restart "$@"
+        ;;
+    rebuild)
+        shift || true
+        cmd_rebuild "$@"
+        ;;
+    logs)
+        shift || true
+        cmd_logs "$@"
+        ;;
+    ps|status)
+        cmd_status
+        ;;
+    shell)
+        shift || true
+        cmd_shell "$@"
+        ;;
+    clean)
+        cmd_clean
+        ;;
+    build)
+        cmd_build
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        usage
+        exit 1
+        ;;
+esac

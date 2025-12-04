@@ -13,7 +13,13 @@ Caddystat is a minimal stats and live dashboard for Caddy web server access logs
 go run ./cmd/caddystat
 
 # Development with Docker (includes test Caddy + nginx site)
-docker compose up --build
+./dev              # Start in foreground
+./dev up -d        # Start in background
+./dev down         # Stop containers
+./dev restart      # Restart containers
+./dev rebuild      # Full rebuild (--no-cache)
+./dev logs         # Follow logs
+./dev shell        # Shell into caddystat container
 
 # Frontend build (from web/ directory)
 cd web && npm install && npm run build   # outputs to web/_site

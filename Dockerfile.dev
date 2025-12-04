@@ -2,7 +2,6 @@ FROM golang:1.25-alpine AS dev
 
 # Install Node.js and Air (Go live reload)
 RUN apk add --no-cache nodejs npm curl && \
-    npm install -g http-server && \
     go install github.com/air-verse/air@latest
 
 WORKDIR /app

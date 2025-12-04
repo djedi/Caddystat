@@ -32,9 +32,22 @@ Environment variables:
 
 ## Docker Compose (Development)
 
+Use the `dev` script to manage the development environment:
+
 ```bash
-docker compose up --build
+./dev              # Start in foreground (default)
+./dev up -d        # Start in background (detached)
+./dev down         # Stop containers
+./dev restart      # Restart containers
+./dev rebuild      # Full rebuild with --no-cache
+./dev logs         # Follow all container logs
+./dev logs caddy   # Follow specific service logs
+./dev ps           # Show container status
+./dev shell        # Open shell in caddystat container
+./dev clean        # Stop and remove all volumes (requires confirmation)
 ```
+
+Run `./dev --help` for full usage information.
 
 Includes a sample `Caddyfile` that logs to `/var/log/caddy/access.log`. Logs are shared with the `caddystat` container via a volume. Web UI is on `http://localhost:8000/`.
 
