@@ -458,7 +458,7 @@
             <div class="card-grid card-grid-3">
               <template x-for="row in geo" :key="row.country + row.city + row.region">
                 <div class="mini-card">
-                  <p class="mini-card-title" x-text="row.country || 'Unknown'"></p>
+                  <p class="mini-card-title" x-text="formatCountry(row.country) || 'Unknown'"></p>
                   <p class="mini-card-desc" x-text="`${row.region || ''} ${row.city || ''}`.trim() || '-'"></p>
                   <p class="mini-card-sub" x-text="formatNumber(row.count) + ' hits'"></p>
                 </div>
@@ -493,7 +493,7 @@
                   <template x-for="(v, idx) in visitors" :key="idx">
                     <tr>
                       <td class="table-mono" x-text="v.ip"></td>
-                      <td x-text="v.country || '-'"></td>
+                      <td x-text="formatCountry(v.country)"></td>
                       <td class="table-mono" x-text="formatNumber(v.pages)"></td>
                       <td class="table-mono" x-text="formatNumber(v.hits)"></td>
                       <td class="table-mono" x-text="formatBytes(v.bandwidth_bytes)"></td>
@@ -752,7 +752,7 @@
                 </div>
                 <div class="detail-row">
                   <dt>Country</dt>
-                  <dd x-text="selectedRequest?.country || '-'"></dd>
+                  <dd x-text="formatCountry(selectedRequest?.country)"></dd>
                 </div>
                 <div class="detail-row">
                   <dt>Region</dt>
@@ -1186,6 +1186,18 @@
           formatNumber(value) {
             if (value === undefined || value === null) return "-";
             return value.toLocaleString();
+          },
+
+          countryFlag(code) {
+            if (!code || code.length !== 2) return '';
+            const upper = code.toUpperCase();
+            const offset = 0x1F1E6 - 65; // Regional indicator A
+            return String.fromCodePoint(upper.charCodeAt(0) + offset, upper.charCodeAt(1) + offset);
+          },
+
+          formatCountry(code) {
+            if (!code) return '-';
+            return `${this.countryFlag(code)} ${code}`;
           },
 
           formatMonth(dateStr) {
