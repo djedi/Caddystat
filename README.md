@@ -23,37 +23,37 @@ All configuration is done via environment variables:
 
 ### Core Settings
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOG_PATH` | `./caddy.log` | Comma-separated Caddy log paths |
-| `LISTEN_ADDR` | `:8404` | HTTP bind address |
-| `DB_PATH` | `./data/caddystat.db` | SQLite database path |
+| Variable      | Default               | Description                     |
+| ------------- | --------------------- | ------------------------------- |
+| `LOG_PATH`    | `./caddy.log`         | Comma-separated Caddy log paths |
+| `LISTEN_ADDR` | `:8404`               | HTTP bind address               |
+| `DB_PATH`     | `./data/caddystat.db` | SQLite database path            |
 
 ### Data Retention
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATA_RETENTION_DAYS` | `7` | Purge raw rows older than N days |
-| `RAW_RETENTION_HOURS` | `48` | Window used for realtime summaries |
+| Variable              | Default | Description                        |
+| --------------------- | ------- | ---------------------------------- |
+| `DATA_RETENTION_DAYS` | `7`     | Purge raw rows older than N days   |
+| `RAW_RETENTION_HOURS` | `48`    | Window used for realtime summaries |
 
 ### GeoIP
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable          | Default   | Description                                        |
+| ----------------- | --------- | -------------------------------------------------- |
 | `MAXMIND_DB_PATH` | _(empty)_ | Path to `GeoLite2-City.mmdb` to enable geo lookups |
 
 ### Privacy
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PRIVACY_HASH_IPS` | `false` | Hash IPs before storing |
-| `PRIVACY_HASH_SALT` | `caddystat` | Salt used for IP hashing |
-| `PRIVACY_ANONYMIZE_LAST_OCTET` | `false` | Zero last IPv4 octet before hashing/storing |
+| Variable                       | Default     | Description                                 |
+| ------------------------------ | ----------- | ------------------------------------------- |
+| `PRIVACY_HASH_IPS`             | `false`     | Hash IPs before storing                     |
+| `PRIVACY_HASH_SALT`            | `caddystat` | Salt used for IP hashing                    |
+| `PRIVACY_ANONYMIZE_LAST_OCTET` | `false`     | Zero last IPv4 octet before hashing/storing |
 
 ### Authentication
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable        | Default   | Description                           |
+| --------------- | --------- | ------------------------------------- |
 | `AUTH_USERNAME` | _(empty)_ | Username for dashboard authentication |
 | `AUTH_PASSWORD` | _(empty)_ | Password for dashboard authentication |
 
@@ -61,16 +61,16 @@ Both `AUTH_USERNAME` and `AUTH_PASSWORD` must be set to enable authentication.
 
 ### Logging
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
+| Variable    | Default | Description                                 |
+| ----------- | ------- | ------------------------------------------- |
+| `LOG_LEVEL` | `INFO`  | Log level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
 
 ### Advanced
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGGREGATION_INTERVAL` | `1h` | Duration between aggregation runs |
-| `AGGREGATION_FLUSH_SECONDS` | `10` | Seconds between flush writes |
+| Variable                    | Default | Description                       |
+| --------------------------- | ------- | --------------------------------- |
+| `AGGREGATION_INTERVAL`      | `1h`    | Duration between aggregation runs |
+| `AGGREGATION_FLUSH_SECONDS` | `10`    | Seconds between flush writes      |
 
 ## Docker Compose (Development)
 
