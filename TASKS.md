@@ -11,8 +11,8 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 - [x] Add unit tests for `internal/ingest` - test log parsing with various Caddy JSON formats
 - [x] Add unit tests for `internal/useragent` - test browser/OS/bot detection
 - [x] Add unit tests for `internal/storage` - test database operations and rollup logic
-- [ ] Add integration tests for API endpoints
-- [ ] Add test fixtures with sample Caddy logs (plain + gzip)
+- [x] Add integration tests for API endpoints
+- [x] Add test fixtures with sample Caddy logs (plain + gzip)
 - [ ] Set up CI/CD pipeline (GitHub Actions) to run tests on push
 
 ### Logging & Observability
@@ -262,7 +262,7 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 17      | 14        | 82%        |
+| Security & Stability     | 17      | 16        | 94%        |
 | Performance & Operations | 16      | 0         | 0%         |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
@@ -270,7 +270,7 @@ Items that should be addressed for long-term maintainability:
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **25**    | **21%**    |
+| **Total**                | **118** | **27**    | **23%**    |
 
 ---
 
