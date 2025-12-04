@@ -17,10 +17,10 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### Logging & Observability
 
-- [ ] Replace `log.Printf` with structured logging (e.g., `slog` from Go 1.21+)
-- [ ] Add log levels (DEBUG, INFO, WARN, ERROR) with `LOG_LEVEL` env var
-- [ ] Log request parsing failures with context (line number, sample content)
-- [ ] Add startup banner with version, config summary, and loaded features
+- [x] Replace `log.Printf` with structured logging (e.g., `slog` from Go 1.21+)
+- [x] Add log levels (DEBUG, INFO, WARN, ERROR) with `LOG_LEVEL` env var
+- [x] Log request parsing failures with context (line number, sample content)
+- [x] Add startup banner with version, config summary, and loaded features
 
 ### Security Hardening
 
@@ -218,7 +218,7 @@ These are small improvements that provide immediate value:
 - [x] Add version number to startup log and `/health` endpoint
 - [x] Add `--version` flag to CLI
 - [x] Add favicon to web UI
-- [ ] Add "last updated" timestamp to dashboard
+- [x] Add "last updated" timestamp to dashboard
 - [x] Fix inconsistent port documentation (8404 vs 8000)
 - [x] Add `robots.txt` to prevent search engine indexing of dashboard
 - [x] Add `X-Robots-Tag: noindex` header to all responses
@@ -262,15 +262,15 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 17      | 1         | 6%         |
+| Security & Stability     | 17      | 5         | 29%        |
 | Performance & Operations | 16      | 0         | 0%         |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
 | Nice-to-Have             | 21      | 0         | 0%         |
-| Quick Wins               | 10      | 8         | 80%        |
+| Quick Wins               | 10      | 9         | 90%        |
 | Bug Fixes                | 8       | 0         | 0%         |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **118** | **9**     | **8%**     |
+| **Total**                | **118** | **14**    | **12%**    |
 
 ---
 

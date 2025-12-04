@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -45,7 +45,7 @@ func (i *Ingestor) Start(ctx context.Context) error {
 	// First, import any existing log files (including rotated/gzipped ones)
 	for _, path := range i.cfg.LogPaths {
 		if err := i.importHistoricalLogs(ctx, path); err != nil {
-			log.Printf("import historical logs for %s: %v", path, err)
+			slog.Warn("failed to import historical logs", "path", path, "error", err)
 		}
 	}
 
@@ -77,13 +77,13 @@ func (i *Ingestor) importHistoricalLogs(ctx context.Context, basePath string) er
 		default:
 		}
 
-		log.Printf("importing historical log: %s", file)
+		slog.Info("importing historical log", "file", file)
 		count, err := i.importLogFile(ctx, file)
 		if err != nil {
-			log.Printf("error importing %s: %v", file, err)
+			slog.Error("failed to import log file", "file", file, "error", err)
 			continue
 		}
-		log.Printf("imported %d entries from %s", count, file)
+		slog.Info("imported log file", "file", file, "entries", count)
 	}
 
 	return nil
@@ -112,10 +112,10 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 	// If file hasn't changed and we've fully imported it, skip
 	if progress != nil && progress.FileMtime == fileMtime && progress.FileSize == fileSize {
 		if isGzipped && progress.ByteOffset == fileSize {
-			log.Printf("skipping already imported gzipped file: %s", path)
+			slog.Debug("skipping already imported gzipped file", "path", path)
 			return 0, nil
 		} else if !isGzipped && progress.ByteOffset >= fileSize {
-			log.Printf("skipping already imported file: %s", path)
+			slog.Debug("skipping already imported file", "path", path)
 			return 0, nil
 		}
 	}
@@ -150,7 +150,7 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 			return 0, err
 		}
 		currentOffset = startOffset
-		log.Printf("resuming import from offset %d: %s", startOffset, path)
+		slog.Debug("resuming import from offset", "path", path, "offset", startOffset)
 	}
 
 	scanner := bufio.NewScanner(reader)
@@ -183,7 +183,7 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 
 		// Log progress and save checkpoint every 10000 entries
 		if count%10000 == 0 {
-			log.Printf("  ... imported %d entries from %s", count, filepath.Base(path))
+			slog.Debug("import progress", "file", filepath.Base(path), "entries", count)
 			// Save progress periodically
 			_ = i.store.SetImportProgress(ctx, storage.ImportProgress{
 				FilePath:   path,
@@ -209,7 +209,7 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 		FileSize:   fileSize,
 		FileMtime:  fileMtime,
 	}); err != nil {
-		log.Printf("warning: failed to save import progress for %s: %v", path, err)
+		slog.Warn("failed to save import progress", "path", path, "error", err)
 	}
 
 	return count, nil
@@ -270,9 +270,10 @@ func (i *Ingestor) tailFile(ctx context.Context, path string) {
 		Location:  &tail.SeekInfo{Offset: 0, Whence: 2},
 	})
 	if err != nil {
-		log.Printf("tail %s: %v", path, err)
+		slog.Error("failed to tail log file", "path", path, "error", err)
 		return
 	}
+	slog.Info("tailing log file", "path", path)
 	for {
 		select {
 		case <-ctx.Done():
@@ -283,7 +284,7 @@ func (i *Ingestor) tailFile(ctx context.Context, path string) {
 				continue
 			}
 			if err := i.handleLine(ctx, line.Text); err != nil {
-				log.Printf("parse %s: %v", path, err)
+				slog.Debug("failed to parse log line", "path", path, "error", err)
 			}
 		}
 	}

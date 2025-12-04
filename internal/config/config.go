@@ -1,11 +1,13 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dustin/Caddystat/internal/logging"
 )
 
 type Config struct {
@@ -22,6 +24,7 @@ type Config struct {
 	AggregationFlushSeconds int
 	AuthUsername            string
 	AuthPassword            string
+	LogLevel                logging.Level
 }
 
 func Load() Config {
@@ -39,6 +42,7 @@ func Load() Config {
 		AggregationFlushSeconds: getEnvInt("AGGREGATION_FLUSH_SECONDS", 10),
 		AuthUsername:            os.Getenv("AUTH_USERNAME"),
 		AuthPassword:            os.Getenv("AUTH_PASSWORD"),
+		LogLevel:                logging.ParseLevel(getEnv("LOG_LEVEL", "INFO")),
 	}
 
 	return cfg
@@ -75,7 +79,7 @@ func getEnvBool(key string, def bool) bool {
 	}
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
-		log.Printf("invalid bool for %s: %v", key, err)
+		slog.Warn("invalid bool environment variable", "key", key, "value", val, "error", err)
 		return def
 	}
 	return parsed
@@ -88,7 +92,7 @@ func getEnvInt(key string, def int) int {
 	}
 	parsed, err := strconv.Atoi(val)
 	if err != nil {
-		log.Printf("invalid int for %s: %v", key, err)
+		slog.Warn("invalid int environment variable", "key", key, "value", val, "error", err)
 		return def
 	}
 	return parsed
@@ -101,7 +105,7 @@ func getEnvDuration(key string, def time.Duration) time.Duration {
 	}
 	parsed, err := time.ParseDuration(val)
 	if err != nil {
-		log.Printf("invalid duration for %s: %v", key, err)
+		slog.Warn("invalid duration environment variable", "key", key, "value", val, "error", err)
 		return def
 	}
 	return parsed

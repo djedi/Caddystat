@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -479,7 +479,7 @@ func writeSSE(w http.ResponseWriter, eventType string, payload []byte) {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("write json: %v", err)
+		slog.Warn("failed to write JSON response", "error", err)
 	}
 }
 

@@ -4,15 +4,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/dustin/Caddystat/internal/config"
 	"github.com/dustin/Caddystat/internal/ingest"
+	"github.com/dustin/Caddystat/internal/logging"
 	"github.com/dustin/Caddystat/internal/server"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
@@ -31,6 +33,9 @@ func main() {
 
 	cfg := config.Load()
 
+	// Initialize structured logging
+	logging.Setup(cfg.LogLevel)
+
 	if *healthcheckFlag {
 		url := fmt.Sprintf("http://localhost%s/health", cfg.ListenAddr)
 		resp, err := http.Get(url)
@@ -46,16 +51,26 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Print startup banner
+	printStartupBanner(cfg)
+
 	store, err := storage.New(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		slog.Error("failed to initialize database", "error", err)
+		os.Exit(1)
 	}
 	defer store.Close()
+	slog.Debug("database initialized", "path", cfg.DBPath)
 
 	geo, err := ingest.NewGeo(cfg.MaxMindDBPath)
 	if err != nil {
-		log.Printf("geo disabled: %v", err)
+		slog.Warn("geo lookups disabled", "reason", err.Error())
+	} else if geo != nil {
+		slog.Info("geo lookups enabled", "db_path", cfg.MaxMindDBPath)
+	} else {
+		slog.Debug("geo lookups disabled", "reason", "MAXMIND_DB_PATH not set")
 	}
+
 	hub := sse.NewHub()
 	ingestor := ingest.New(cfg, store, hub, geo)
 
@@ -63,7 +78,8 @@ func main() {
 	defer cancel()
 
 	if err := ingestor.Start(ctx); err != nil {
-		log.Fatalf("ingestor: %v", err)
+		slog.Error("failed to start ingestor", "error", err)
+		os.Exit(1)
 	}
 
 	go func() {
@@ -74,8 +90,9 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				slog.Debug("running data cleanup", "retention_days", cfg.DataRetentionDays)
 				if err := store.Cleanup(context.Background(), cfg.DataRetentionDays); err != nil {
-					log.Printf("cleanup: %v", err)
+					slog.Warn("data cleanup failed", "error", err)
 				}
 			}
 		}
@@ -87,16 +104,47 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("caddystat %s starting on %s", version.Version, cfg.ListenAddr)
+		slog.Info("server started", "addr", cfg.ListenAddr, "version", version.Version)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server: %v", err)
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
+	slog.Info("shutting down...")
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	_ = srv.Shutdown(shutdownCtx)
-	log.Println("shutdown complete")
+	slog.Info("shutdown complete")
 	os.Exit(0)
+}
+
+func printStartupBanner(cfg config.Config) {
+	fmt.Println()
+	fmt.Println("  ╔═══════════════════════════════════════════════╗")
+	fmt.Println("  ║              Caddystat                        ║")
+	fmt.Println("  ║       Web Analytics for Caddy                 ║")
+	fmt.Println("  ╚═══════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Printf("  Version:        %s\n", version.Version)
+	if version.GitCommit != "" && version.GitCommit != "unknown" {
+		fmt.Printf("  Commit:         %s\n", version.GitCommit)
+	}
+	if version.BuildTime != "" && version.BuildTime != "unknown" {
+		fmt.Printf("  Built:          %s\n", version.BuildTime)
+	}
+	fmt.Println()
+	fmt.Printf("  Listen:         %s\n", cfg.ListenAddr)
+	fmt.Printf("  Database:       %s\n", cfg.DBPath)
+	fmt.Printf("  Log Paths:      %s\n", strings.Join(cfg.LogPaths, ", "))
+	fmt.Printf("  Log Level:      %s\n", cfg.LogLevel.String())
+	fmt.Printf("  Retention:      %d days\n", cfg.DataRetentionDays)
+	if cfg.MaxMindDBPath != "" {
+		fmt.Printf("  GeoIP:          %s\n", cfg.MaxMindDBPath)
+	}
+	if cfg.AuthEnabled() {
+		fmt.Printf("  Auth:           enabled\n")
+	}
+	fmt.Println()
 }
