@@ -1274,3 +1274,8 @@ FROM requests`
 	}
 	return out, rows.Err()
 }
+
+// Ping checks database connectivity by executing a simple query.
+func (s *Storage) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}

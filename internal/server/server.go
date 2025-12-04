@@ -15,6 +15,7 @@ import (
 	"github.com/dustin/Caddystat/internal/config"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
+	"github.com/dustin/Caddystat/internal/version"
 )
 
 type Server struct {
@@ -39,6 +40,10 @@ func New(store *storage.Storage, hub *sse.Hub, cfg config.Config) *Server {
 }
 
 func (s *Server) routes() {
+	// Public endpoints (no auth required)
+	s.mux.HandleFunc("/health", s.handleHealth)
+	s.mux.HandleFunc("/robots.txt", s.handleRobotsTxt)
+
 	// Auth endpoints (always accessible)
 	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("/api/auth/logout", s.handleLogout)
@@ -63,7 +68,35 @@ func (s *Server) routes() {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Prevent search engine indexing
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	status := "ok"
+	dbStatus := "connected"
+	httpStatus := http.StatusOK
+
+	if err := s.store.Ping(ctx); err != nil {
+		status = "error"
+		dbStatus = "disconnected"
+		httpStatus = http.StatusServiceUnavailable
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpStatus)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  status,
+		"db":      dbStatus,
+		"version": version.Version,
+	})
+}
+
+func (s *Server) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("User-agent: *\nDisallow: /\n"))
 }
 
 // Authentication methods

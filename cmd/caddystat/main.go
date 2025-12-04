@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,9 +16,18 @@ import (
 	"github.com/dustin/Caddystat/internal/server"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
+	"github.com/dustin/Caddystat/internal/version"
 )
 
 func main() {
+	versionFlag := flag.Bool("version", false, "Print version information and exit")
+	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("caddystat %s (commit: %s, built: %s)\n", version.Version, version.GitCommit, version.BuildTime)
+		os.Exit(0)
+	}
+
 	cfg := config.Load()
 
 	store, err := storage.New(cfg.DBPath)
@@ -60,7 +71,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("listening on %s", cfg.ListenAddr)
+		log.Printf("caddystat %s starting on %s", version.Version, cfg.ListenAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}
