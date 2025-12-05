@@ -13,7 +13,7 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 - [x] Add unit tests for `internal/storage` - test database operations and rollup logic
 - [x] Add integration tests for API endpoints
 - [x] Add test fixtures with sample Caddy logs (plain + gzip)
-- [ ] Set up CI/CD pipeline (GitHub Actions) to run tests on push
+- [x] Set up CI/CD pipeline (GitHub Actions) to run tests on push
 
 ### Logging & Observability
 
@@ -30,12 +30,12 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 - [x] Add Content Security Policy headers
 - [x] Implement persistent session storage (SQLite-backed instead of in-memory)
 - [x] Add session cleanup job for expired sessions
-- [ ] Remove `.env.sample` from repo or ensure no real credentials
+- [x] Remove `.env.sample` from repo or ensure no real credentials (N/A - file doesn't exist)
 
 ### Health & Operations
 
 - [x] Add `GET /health` endpoint (returns DB connectivity status)
-- [ ] Add `GET /api/stats/status` endpoint (DB size, row counts, last import time)
+- [x] Add `GET /api/stats/status` endpoint (DB size, row counts, last import time)
 - [x] Implement graceful shutdown (close SSE connections, flush pending writes)
 - [x] Add SIGTERM/SIGINT handler with cleanup
 
@@ -262,7 +262,7 @@ Items that should be addressed for long-term maintainability:
 
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
-| Security & Stability     | 21      | 18        | 86%        |
+| Security & Stability     | 21      | 21        | 100%       |
 | Performance & Operations | 16      | 6         | 38%        |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
@@ -270,7 +270,7 @@ Items that should be addressed for long-term maintainability:
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **122** | **35**    | **29%**    |
+| **Total**                | **122** | **38**    | **31%**    |
 
 ---
 

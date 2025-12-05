@@ -1401,3 +1401,98 @@ func (s *Storage) DBPath() string {
 	}
 	return path
 }
+
+// DBFileSize returns the database file size in bytes.
+func (s *Storage) DBFileSize() (int64, error) {
+	dbPath := s.DBPath()
+	if dbPath == "" || dbPath == ":memory:" {
+		return 0, nil
+	}
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+// GetLastImportTime returns the most recent request timestamp, or zero if no data.
+func (s *Storage) GetLastImportTime(ctx context.Context) (time.Time, error) {
+	var ts sql.NullString
+	row := s.db.QueryRowContext(ctx, `SELECT MAX(ts) FROM requests`)
+	if err := row.Scan(&ts); err != nil {
+		return time.Time{}, err
+	}
+	if !ts.Valid || ts.String == "" {
+		return time.Time{}, nil
+	}
+	// Parse the timestamp string (Go's time format from sql driver)
+	parsed, err := time.Parse("2006-01-02 15:04:05 -0700 MST", ts.String)
+	if err != nil {
+		// Try alternate formats
+		parsed, err = time.Parse("2006-01-02T15:04:05Z", ts.String)
+		if err != nil {
+			parsed, err = time.Parse("2006-01-02 15:04:05", ts.String)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("parsing timestamp %q: %w", ts.String, err)
+			}
+		}
+	}
+	return parsed.UTC(), nil
+}
+
+// SystemStatus represents the overall system status.
+type SystemStatus struct {
+	DBSizeBytes      int64          `json:"db_size_bytes"`
+	DBSizeHuman      string         `json:"db_size_human"`
+	RequestsCount    int64          `json:"requests_count"`
+	HourlyRollups    int64          `json:"hourly_rollups"`
+	DailyRollups     int64          `json:"daily_rollups"`
+	LastImportTime   *time.Time     `json:"last_import_time,omitempty"`
+	ActiveSessions   int64          `json:"active_sessions"`
+	TrackedLogFiles  int64          `json:"tracked_log_files"`
+}
+
+// GetSystemStatus returns comprehensive system status information.
+func (s *Storage) GetSystemStatus(ctx context.Context) (SystemStatus, error) {
+	var status SystemStatus
+
+	// Get database file size
+	dbSize, err := s.DBFileSize()
+	if err == nil {
+		status.DBSizeBytes = dbSize
+		status.DBSizeHuman = humanizeBytes(dbSize)
+	}
+
+	// Get table counts
+	dbStats, err := s.GetDatabaseStats(ctx)
+	if err != nil {
+		return status, fmt.Errorf("getting database stats: %w", err)
+	}
+	status.RequestsCount = dbStats.RequestsCount
+	status.HourlyRollups = dbStats.RollupsHourlyCount
+	status.DailyRollups = dbStats.RollupsDailyCount
+	status.ActiveSessions = dbStats.SessionsCount
+	status.TrackedLogFiles = dbStats.ImportProgressCount
+
+	// Get last import time
+	lastImport, err := s.GetLastImportTime(ctx)
+	if err == nil && !lastImport.IsZero() {
+		status.LastImportTime = &lastImport
+	}
+
+	return status, nil
+}
+
+// humanizeBytes converts bytes to a human-readable string.
+func humanizeBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}

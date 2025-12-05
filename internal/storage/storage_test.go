@@ -1199,3 +1199,116 @@ func TestStorage_DBPath(t *testing.T) {
 		t.Error("DBPath() returned empty string")
 	}
 }
+
+func TestStorage_DBFileSize(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	size, err := s.DBFileSize()
+	if err != nil {
+		t.Fatalf("DBFileSize() error = %v", err)
+	}
+	if size <= 0 {
+		t.Errorf("DBFileSize() = %d, want > 0", size)
+	}
+}
+
+func TestStorage_GetLastImportTime_Empty(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	lastImport, err := s.GetLastImportTime(ctx)
+	if err != nil {
+		t.Fatalf("GetLastImportTime() error = %v", err)
+	}
+	if !lastImport.IsZero() {
+		t.Errorf("GetLastImportTime() = %v, want zero time for empty database", lastImport)
+	}
+}
+
+func TestStorage_GetLastImportTime_WithData(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+
+	// Insert some requests
+	for i := 0; i < 3; i++ {
+		rec := RequestRecord{
+			Timestamp: now.Add(-time.Duration(i) * time.Hour),
+			Host:      "example.com",
+			Path:      "/test",
+			Status:    200,
+		}
+		if err := s.InsertRequest(ctx, rec); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	lastImport, err := s.GetLastImportTime(ctx)
+	if err != nil {
+		t.Fatalf("GetLastImportTime() error = %v", err)
+	}
+	if lastImport.IsZero() {
+		t.Error("GetLastImportTime() returned zero time, expected a timestamp")
+	}
+	// The last import time should be the most recent request
+	if lastImport.Unix() != now.Unix() {
+		t.Errorf("GetLastImportTime() = %v, want %v", lastImport, now)
+	}
+}
+
+func TestStorage_GetSystemStatus(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+
+	// Insert some requests
+	for i := 0; i < 5; i++ {
+		rec := RequestRecord{
+			Timestamp: now.Add(-time.Duration(i) * time.Hour),
+			Host:      "example.com",
+			Path:      "/test",
+			Status:    200,
+		}
+		if err := s.InsertRequest(ctx, rec); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Create a session
+	if err := s.CreateSession(ctx, "test-token", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	status, err := s.GetSystemStatus(ctx)
+	if err != nil {
+		t.Fatalf("GetSystemStatus() error = %v", err)
+	}
+
+	if status.RequestsCount != 5 {
+		t.Errorf("RequestsCount = %d, want 5", status.RequestsCount)
+	}
+	if status.ActiveSessions != 1 {
+		t.Errorf("ActiveSessions = %d, want 1", status.ActiveSessions)
+	}
+	if status.DBSizeBytes <= 0 {
+		t.Errorf("DBSizeBytes = %d, want > 0", status.DBSizeBytes)
+	}
+	if status.DBSizeHuman == "" {
+		t.Error("DBSizeHuman is empty")
+	}
+	if status.HourlyRollups < 1 {
+		t.Errorf("HourlyRollups = %d, want >= 1", status.HourlyRollups)
+	}
+	if status.DailyRollups < 1 {
+		t.Errorf("DailyRollups = %d, want >= 1", status.DailyRollups)
+	}
+	if status.LastImportTime == nil {
+		t.Error("LastImportTime is nil, expected a timestamp")
+	}
+}

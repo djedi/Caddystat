@@ -479,6 +479,33 @@ func TestAPIDaily(t *testing.T) {
 	}
 }
 
+func TestAPIStatus(t *testing.T) {
+	srv, cleanup := setupTestServerWithData(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/status", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp storage.SystemStatus
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Verify the response has expected fields
+	if resp.RequestsCount <= 0 {
+		t.Error("expected RequestsCount > 0")
+	}
+	if resp.DBSizeHuman == "" {
+		t.Error("expected DBSizeHuman to be set")
+	}
+}
+
 func TestAPIAuthCheck_NoAuthConfigured(t *testing.T) {
 	srv, cleanup := setupTestServerWithData(t)
 	defer cleanup()
@@ -766,6 +793,7 @@ func TestProtectedEndpoint_RequiresAuth(t *testing.T) {
 		"/api/stats/recent",
 		"/api/stats/monthly",
 		"/api/stats/daily",
+		"/api/stats/status",
 	}
 
 	for _, endpoint := range endpoints {

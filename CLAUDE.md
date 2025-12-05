@@ -87,6 +87,7 @@ web/                      Frontend (Alpine.js + Tailwind, built with PostCSS)
 - `GET /api/stats/os` - OS usage stats
 - `GET /api/stats/robots` - Bot/spider stats
 - `GET /api/stats/referrers` - Referrer stats
+- `GET /api/stats/status` - System status (DB size, row counts, last import time)
 - `GET /api/stats/monthly?months=12` - Monthly history
 - `GET /api/stats/daily` - Current month daily breakdown
 - `GET /api/stats/recent?limit=20` - Recent individual requests

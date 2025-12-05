@@ -66,6 +66,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/stats/robots", s.requireAuth(s.handleRobots))
 	s.mux.HandleFunc("/api/stats/referrers", s.requireAuth(s.handleReferrers))
 	s.mux.HandleFunc("/api/stats/recent", s.requireAuth(s.handleRecentRequests))
+	s.mux.HandleFunc("/api/stats/status", s.requireAuth(s.handleStatus))
 	s.mux.HandleFunc("/api/sse", s.requireAuth(s.handleSSE))
 
 	site := http.Dir(filepath.Join(".", "web", "_site"))
@@ -502,6 +503,15 @@ func (s *Server) handleDaily(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, stats)
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := s.store.GetSystemStatus(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, status)
 }
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
