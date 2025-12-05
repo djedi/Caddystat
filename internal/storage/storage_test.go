@@ -332,10 +332,11 @@ func TestStorage_Cleanup(t *testing.T) {
 	now := time.Now().UTC()
 
 	// Insert old and new requests
+	// Note: RecentRequests uses a 24-hour filter, so we use recent timestamps for remaining records
 	requests := []RequestRecord{
 		{Timestamp: now.AddDate(0, 0, -10), Host: "example.com", Path: "/old", Status: 200, IP: "1.1.1.1"},
-		{Timestamp: now.AddDate(0, 0, -5), Host: "example.com", Path: "/medium", Status: 200, IP: "2.2.2.2"},
-		{Timestamp: now, Host: "example.com", Path: "/new", Status: 200, IP: "3.3.3.3"},
+		{Timestamp: now.Add(-1 * time.Hour), Host: "example.com", Path: "/recent1", Status: 200, IP: "2.2.2.2"},
+		{Timestamp: now, Host: "example.com", Path: "/recent2", Status: 200, IP: "3.3.3.3"},
 	}
 	for _, req := range requests {
 		if err := s.InsertRequest(ctx, req); err != nil {
@@ -348,6 +349,7 @@ func TestStorage_Cleanup(t *testing.T) {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 
+	// RecentRequests only returns requests within 24 hours, both remaining are recent
 	recent, err := s.RecentRequests(ctx, 10, "")
 	if err != nil {
 		t.Fatalf("RecentRequests() error = %v", err)
@@ -443,6 +445,47 @@ func TestStorage_RecentRequests_MaxLimit(t *testing.T) {
 	}
 	if len(recent) != 100 {
 		t.Errorf("expected 100 requests (max limit), got %d", len(recent))
+	}
+}
+
+func TestStorage_RecentRequests_TimeFilter(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert requests at different times:
+	// - 2 within the last 24 hours (should be returned)
+	// - 2 outside the 24 hour window (should NOT be returned)
+	requests := []RequestRecord{
+		{Timestamp: now.Add(-48 * time.Hour), Host: "example.com", Path: "/old1", Status: 200, IP: "1.1.1.1"},
+		{Timestamp: now.Add(-25 * time.Hour), Host: "example.com", Path: "/old2", Status: 200, IP: "2.2.2.2"},
+		{Timestamp: now.Add(-12 * time.Hour), Host: "example.com", Path: "/recent1", Status: 200, IP: "3.3.3.3"},
+		{Timestamp: now.Add(-1 * time.Hour), Host: "example.com", Path: "/recent2", Status: 200, IP: "4.4.4.4"},
+	}
+	for _, req := range requests {
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// RecentRequests uses a 24-hour filter, so only 2 should be returned
+	recent, err := s.RecentRequests(ctx, 10, "")
+	if err != nil {
+		t.Fatalf("RecentRequests() error = %v", err)
+	}
+	if len(recent) != 2 {
+		t.Errorf("expected 2 requests within 24 hours, got %d", len(recent))
+	}
+
+	// Verify the returned requests are the recent ones
+	paths := make(map[string]bool)
+	for _, r := range recent {
+		paths[r.Path] = true
+	}
+	if !paths["/recent1"] || !paths["/recent2"] {
+		t.Errorf("expected /recent1 and /recent2 to be returned, got %v", paths)
 	}
 }
 

@@ -1316,6 +1316,7 @@ ON CONFLICT(file_path) DO UPDATE SET
 }
 
 // RecentRequests returns the most recent N requests, optionally filtered by host
+// Uses a 24-hour time filter to leverage the ts index and avoid full table scans
 func (s *Storage) RecentRequests(ctx context.Context, limit int, host string) ([]RecentRequest, error) {
 	if limit <= 0 {
 		limit = 20
@@ -1324,6 +1325,9 @@ func (s *Storage) RecentRequests(ctx context.Context, limit int, host string) ([
 		limit = 100
 	}
 
+	// Use 24-hour time window to leverage idx_requests_ts index
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+
 	query := `
 SELECT
 	id, ts, host, path, status, bytes, ip, referrer, user_agent, resp_time_ms,
@@ -1331,11 +1335,12 @@ SELECT
 	IFNULL(browser, '') as browser, IFNULL(browser_version, '') as browser_version,
 	IFNULL(os, '') as os, IFNULL(os_version, '') as os_version,
 	IFNULL(device_type, '') as device_type, IFNULL(is_bot, 0) as is_bot, IFNULL(bot_name, '') as bot_name
-FROM requests`
+FROM requests
+WHERE ts >= ?`
 
-	args := []any{}
+	args := []any{cutoff}
 	if host != "" {
-		query += " WHERE host = ?"
+		query += " AND host = ?"
 		args = append(args, host)
 	}
 	query += " ORDER BY id DESC LIMIT ?"
