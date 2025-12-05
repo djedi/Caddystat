@@ -455,6 +455,33 @@ DELETE FROM requests WHERE ts < datetime('now', ?)
 	return err
 }
 
+// Vacuum runs SQLite VACUUM to reclaim space and defragment the database.
+// This is useful to run after bulk deletes (like data retention cleanup).
+// Returns the bytes freed (approximate, based on file size before/after).
+func (s *Storage) Vacuum(ctx context.Context) (int64, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	// Get file size before vacuum
+	sizeBefore, _ := s.DBFileSize()
+
+	// Run VACUUM - this rebuilds the database file
+	_, err := s.db.ExecContext(ctx, "VACUUM")
+	if err != nil {
+		return 0, fmt.Errorf("vacuum failed: %w", err)
+	}
+
+	// Get file size after vacuum
+	sizeAfter, _ := s.DBFileSize()
+
+	// Return bytes freed (positive number if space was reclaimed)
+	bytesFreed := sizeBefore - sizeAfter
+	if bytesFreed < 0 {
+		bytesFreed = 0
+	}
+	return bytesFreed, nil
+}
+
 func (s *Storage) Summary(ctx context.Context, since time.Duration, host string) (Summary, error) {
 	var out Summary
 	from := time.Now().Add(-since)

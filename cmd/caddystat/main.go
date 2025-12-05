@@ -132,6 +132,16 @@ func main() {
 				slog.Debug("running data cleanup", "retention_days", cfg.DataRetentionDays)
 				if err := store.Cleanup(context.Background(), cfg.DataRetentionDays); err != nil {
 					slog.Warn("data cleanup failed", "error", err)
+				} else {
+					// Run VACUUM after cleanup to reclaim disk space
+					slog.Debug("running database vacuum")
+					if bytesFreed, err := store.Vacuum(context.Background()); err != nil {
+						slog.Warn("database vacuum failed", "error", err)
+					} else if bytesFreed > 0 {
+						slog.Info("database vacuum completed", "bytes_freed", bytesFreed)
+					} else {
+						slog.Debug("database vacuum completed", "bytes_freed", 0)
+					}
 				}
 			case <-sessionTicker.C:
 				slog.Debug("running session cleanup")

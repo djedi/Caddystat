@@ -1497,3 +1497,143 @@ func TestStorage_PreparedStatements_Sessions(t *testing.T) {
 		t.Errorf("SessionsCount = %d, want 2", stats.SessionsCount)
 	}
 }
+
+func TestStorage_Vacuum_Empty(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Vacuum on empty database should succeed
+	bytesFreed, err := s.Vacuum(ctx)
+	if err != nil {
+		t.Fatalf("Vacuum() error = %v", err)
+	}
+	// Empty database shouldn't free much space
+	if bytesFreed < 0 {
+		t.Errorf("Vacuum() bytesFreed = %d, want >= 0", bytesFreed)
+	}
+}
+
+func TestStorage_Vacuum_AfterDeletes(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert many records to create some database size
+	for i := 0; i < 100; i++ {
+		req := RequestRecord{
+			Timestamp: now.Add(time.Duration(-i) * time.Second),
+			Host:      "example.com",
+			Path:      "/test-vacuum",
+			Status:    200,
+			Bytes:     1024,
+			IP:        "192.168.1.1",
+			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Get size before delete
+	sizeBefore, err := s.DBFileSize()
+	if err != nil {
+		t.Fatalf("DBFileSize() error = %v", err)
+	}
+
+	// Delete all records
+	_, err = s.db.ExecContext(ctx, "DELETE FROM requests")
+	if err != nil {
+		t.Fatalf("DELETE error = %v", err)
+	}
+
+	// Size after delete (before vacuum) - may not change much due to SQLite behavior
+	sizeAfterDelete, err := s.DBFileSize()
+	if err != nil {
+		t.Fatalf("DBFileSize() after delete error = %v", err)
+	}
+
+	// Run vacuum
+	bytesFreed, err := s.Vacuum(ctx)
+	if err != nil {
+		t.Fatalf("Vacuum() error = %v", err)
+	}
+
+	// Get size after vacuum
+	sizeAfterVacuum, err := s.DBFileSize()
+	if err != nil {
+		t.Fatalf("DBFileSize() after vacuum error = %v", err)
+	}
+
+	// Log sizes for debugging
+	t.Logf("Size before: %d, after delete: %d, after vacuum: %d, bytesFreed: %d",
+		sizeBefore, sizeAfterDelete, sizeAfterVacuum, bytesFreed)
+
+	// After vacuum, database should work correctly
+	stats, err := s.GetDatabaseStats(ctx)
+	if err != nil {
+		t.Fatalf("GetDatabaseStats() error = %v", err)
+	}
+	if stats.RequestsCount != 0 {
+		t.Errorf("RequestsCount = %d, want 0", stats.RequestsCount)
+	}
+}
+
+func TestStorage_Vacuum_DatabaseStillWorking(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert some records
+	for i := 0; i < 10; i++ {
+		req := RequestRecord{
+			Timestamp: now.Add(time.Duration(-i) * time.Second),
+			Host:      "example.com",
+			Path:      "/test",
+			Status:    200,
+			Bytes:     1024,
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() before vacuum error = %v", err)
+		}
+	}
+
+	// Run vacuum
+	_, err := s.Vacuum(ctx)
+	if err != nil {
+		t.Fatalf("Vacuum() error = %v", err)
+	}
+
+	// Verify database still works after vacuum
+	if err := s.Health(ctx); err != nil {
+		t.Fatalf("Health() after vacuum error = %v", err)
+	}
+
+	// Insert more records
+	for i := 0; i < 5; i++ {
+		req := RequestRecord{
+			Timestamp: now.Add(time.Duration(i+1) * time.Second),
+			Host:      "example.com",
+			Path:      "/test-after",
+			Status:    200,
+			Bytes:     512,
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() after vacuum error = %v", err)
+		}
+	}
+
+	// Verify all records are accessible
+	recent, err := s.RecentRequests(ctx, 20, "")
+	if err != nil {
+		t.Fatalf("RecentRequests() error = %v", err)
+	}
+	if len(recent) != 15 {
+		t.Errorf("expected 15 requests, got %d", len(recent))
+	}
+}
