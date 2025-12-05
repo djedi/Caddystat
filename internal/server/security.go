@@ -109,7 +109,7 @@ func (s *Server) requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 		method := strings.ToUpper(r.Method)
 		if method == "POST" || method == "PUT" || method == "DELETE" || method == "PATCH" {
 			if !validateCSRFToken(r) {
-				http.Error(w, "invalid or missing CSRF token", http.StatusForbidden)
+				writeErrorWithCode(w, http.StatusForbidden, "invalid or missing CSRF token", "CSRF_INVALID")
 				return
 			}
 		}

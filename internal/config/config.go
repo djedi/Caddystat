@@ -29,6 +29,8 @@ type Config struct {
 	MaxRequestBodyBytes     int64
 	DBMaxConnections        int
 	DBQueryTimeout          time.Duration
+	BotSignaturesPaths      []string // Comma-separated list of bot signature files (community lists)
+	SSEBufferSize           int      // Channel buffer size for SSE clients
 }
 
 func Load() Config {
@@ -51,6 +53,8 @@ func Load() Config {
 		MaxRequestBodyBytes:     getEnvInt64("MAX_REQUEST_BODY_BYTES", 1<<20), // 1MB default
 		DBMaxConnections:        getEnvInt("DB_MAX_CONNECTIONS", 1),
 		DBQueryTimeout:          getEnvDuration("DB_QUERY_TIMEOUT", 30*time.Second),
+		BotSignaturesPaths:      splitEnv("BOT_SIGNATURES_PATH", nil),
+		SSEBufferSize:           getEnvInt("SSE_BUFFER_SIZE", 32),
 	}
 
 	return cfg

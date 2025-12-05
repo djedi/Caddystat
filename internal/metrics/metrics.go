@@ -15,6 +15,7 @@ type Metrics struct {
 
 	// SSE metrics
 	SSESubscribersGauge prometheus.GaugeFunc
+	SSEDroppedMessages  prometheus.Counter
 
 	// Ingestion metrics
 	IngestRequestsTotal prometheus.Counter
@@ -22,6 +23,10 @@ type Metrics struct {
 	IngestDuration      prometheus.Histogram
 	LastIngestTimestamp prometheus.Gauge
 	IngestBytesTotal    prometheus.Counter
+
+	// Bot ingestion metrics
+	IngestBotRequestsTotal *prometheus.CounterVec
+	IngestBotBytesTotal    *prometheus.CounterVec
 
 	// Database metrics
 	DBSizeBytes      prometheus.GaugeFunc
@@ -150,6 +155,14 @@ func New(
 				return float64(sseClientCountFunc())
 			},
 		),
+		SSEDroppedMessages: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "caddystat",
+				Subsystem: "sse",
+				Name:      "dropped_messages_total",
+				Help:      "Total number of SSE messages dropped due to slow clients",
+			},
+		),
 		IngestRequestsTotal: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "caddystat",
@@ -190,6 +203,24 @@ func New(
 				Name:      "bytes_total",
 				Help:      "Total bytes processed from log entries",
 			},
+		),
+		IngestBotRequestsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "caddystat",
+				Subsystem: "ingest",
+				Name:      "bot_requests_total",
+				Help:      "Total number of bot requests ingested, by intent",
+			},
+			[]string{"intent"},
+		),
+		IngestBotBytesTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "caddystat",
+				Subsystem: "ingest",
+				Name:      "bot_bytes_total",
+				Help:      "Total bytes from bot requests, by intent",
+			},
+			[]string{"intent"},
 		),
 		DBSizeBytes: prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
@@ -334,11 +365,14 @@ func (m *Metrics) Register() error {
 		m.HTTPRequestsTotal,
 		m.HTTPRequestDuration,
 		m.SSESubscribersGauge,
+		m.SSEDroppedMessages,
 		m.IngestRequestsTotal,
 		m.IngestErrorsTotal,
 		m.IngestDuration,
 		m.LastIngestTimestamp,
 		m.IngestBytesTotal,
+		m.IngestBotRequestsTotal,
+		m.IngestBotBytesTotal,
 		m.DBSizeBytes,
 		m.DBRequestsTotal,
 		m.DBSessionsTotal,
@@ -382,4 +416,18 @@ func (m *Metrics) RecordIngestError() {
 // SetLastIngestTimestamp sets the timestamp of the last ingested entry.
 func (m *Metrics) SetLastIngestTimestamp(ts float64) {
 	m.LastIngestTimestamp.Set(ts)
+}
+
+// RecordBotIngest records a bot request ingestion with intent label.
+func (m *Metrics) RecordBotIngest(intent string, bytes int64) {
+	if intent == "" {
+		intent = "unknown"
+	}
+	m.IngestBotRequestsTotal.WithLabelValues(intent).Inc()
+	m.IngestBotBytesTotal.WithLabelValues(intent).Add(float64(bytes))
+}
+
+// RecordSSEDropped records that an SSE message was dropped due to a slow client.
+func (m *Metrics) RecordSSEDropped() {
+	m.SSEDroppedMessages.Inc()
 }

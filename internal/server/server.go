@@ -5,9 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -67,7 +71,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/stats/referrers", s.requireAuth(s.handleReferrers))
 	s.mux.HandleFunc("/api/stats/recent", s.requireAuth(s.handleRecentRequests))
 	s.mux.HandleFunc("/api/stats/status", s.requireAuth(s.handleStatus))
+	s.mux.HandleFunc("/api/stats/performance", s.requireAuth(s.handlePerformance))
+	s.mux.HandleFunc("/api/stats/bandwidth", s.requireAuth(s.handleBandwidth))
+	s.mux.HandleFunc("/api/stats/sessions", s.requireAuth(s.handleSessions))
 	s.mux.HandleFunc("/api/sse", s.requireAuth(s.handleSSE))
+
+	// Export endpoints
+	s.mux.HandleFunc("/api/export/csv", s.requireAuth(s.handleExportCSV))
+	s.mux.HandleFunc("/api/export/json", s.requireAuth(s.handleExportJSON))
+	s.mux.HandleFunc("/api/export/backup", s.requireAuth(s.handleExportBackup))
+
+	// Site management endpoints
+	s.mux.HandleFunc("/api/sites", s.requireAuth(s.requireCSRF(s.handleSites)))
+	s.mux.HandleFunc("/api/sites/", s.requireAuth(s.requireCSRF(s.handleSiteByID)))
 
 	site := http.Dir(filepath.Join(".", "web", "_site"))
 	s.mux.Handle("/", http.FileServer(site))
@@ -95,7 +111,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if s.metrics != nil {
 				s.metrics.RecordHTTPRequest(r.Method, r.URL.Path, "429", time.Since(start).Seconds())
 			}
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			writeErrorWithCode(w, http.StatusTooManyRequests, "rate limit exceeded", "RATE_LIMITED")
 			return
 		}
 	}
@@ -105,7 +121,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.metrics != nil {
 			s.metrics.RecordHTTPRequest(r.Method, r.URL.Path, "413", time.Since(start).Seconds())
 		}
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		writeErrorWithCode(w, http.StatusRequestEntityTooLarge, "request body too large", "REQUEST_TOO_LARGE")
 		return
 	}
 	if s.cfg.MaxRequestBodyBytes > 0 && r.Body != nil {
@@ -250,7 +266,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		// Check for session cookie
 		cookie, err := r.Cookie(sessionCookieName)
 		if err != nil || !s.validateSession(r.Context(), cookie.Value) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeErrorWithCode(w, http.StatusUnauthorized, "unauthorized", "UNAUTHORIZED")
 			return
 		}
 		next(w, r)
@@ -259,7 +275,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
 		return
 	}
 
@@ -274,7 +290,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		writeErrorWithCode(w, http.StatusBadRequest, "invalid request body", "INVALID_REQUEST")
 		return
 	}
 
@@ -283,13 +299,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	passwordMatch := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AuthPassword)) == 1
 
 	if !usernameMatch || !passwordMatch {
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		writeErrorWithCode(w, http.StatusUnauthorized, "invalid credentials", "INVALID_CREDENTIALS")
 		return
 	}
 
 	token, err := s.createSession(r.Context())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeInternalError(w, err, "create session")
 		return
 	}
 
@@ -307,7 +323,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
 		return
 	}
 
@@ -350,7 +366,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	stats, err := s.store.Summary(r.Context(), dur, host)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get summary")
 		return
 	}
 	writeJSON(w, stats)
@@ -361,7 +377,7 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	stats, err := s.store.TimeSeriesRange(r.Context(), dur, host)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get requests")
 		return
 	}
 	writeJSON(w, stats)
@@ -372,7 +388,7 @@ func (s *Server) handleGeo(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	stats, err := s.store.Geo(r.Context(), dur, host)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get geo")
 		return
 	}
 	writeJSON(w, stats)
@@ -389,7 +405,7 @@ func (s *Server) handleVisitors(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := s.store.Visitors(r.Context(), dur, host, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get visitors")
 		return
 	}
 	writeJSON(w, stats)
@@ -406,7 +422,7 @@ func (s *Server) handleBrowsers(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := s.store.Browsers(r.Context(), dur, host, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get browsers")
 		return
 	}
 	writeJSON(w, stats)
@@ -423,7 +439,7 @@ func (s *Server) handleOS(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := s.store.OperatingSystems(r.Context(), dur, host, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get operating systems")
 		return
 	}
 	writeJSON(w, stats)
@@ -440,7 +456,7 @@ func (s *Server) handleRobots(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := s.store.Robots(r.Context(), dur, host, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get robots")
 		return
 	}
 	writeJSON(w, stats)
@@ -457,7 +473,7 @@ func (s *Server) handleReferrers(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := s.store.Referrers(r.Context(), dur, host, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get referrers")
 		return
 	}
 	writeJSON(w, stats)
@@ -473,7 +489,7 @@ func (s *Server) handleRecentRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := s.store.RecentRequests(r.Context(), limit, host)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get recent requests")
 		return
 	}
 	writeJSON(w, stats)
@@ -489,7 +505,7 @@ func (s *Server) handleMonthly(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := s.store.MonthlyHistory(r.Context(), months, host)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get monthly history")
 		return
 	}
 	writeJSON(w, stats)
@@ -499,7 +515,7 @@ func (s *Server) handleDaily(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	stats, err := s.store.DailyHistory(r.Context(), host)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get daily history")
 		return
 	}
 	writeJSON(w, stats)
@@ -508,16 +524,68 @@ func (s *Server) handleDaily(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := s.store.GetSystemStatus(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, err, "get system status")
 		return
 	}
 	writeJSON(w, status)
 }
 
+func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
+	dur := parseRange(r.URL.Query().Get("range"), 24*time.Hour)
+	host := r.URL.Query().Get("host")
+	stats, err := s.store.PerformanceStats(r.Context(), dur, host)
+	if err != nil {
+		writeInternalError(w, err, "get performance stats")
+		return
+	}
+	writeJSON(w, stats)
+}
+
+func (s *Server) handleBandwidth(w http.ResponseWriter, r *http.Request) {
+	dur := parseRange(r.URL.Query().Get("range"), 24*time.Hour)
+	host := r.URL.Query().Get("host")
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	stats, err := s.store.BandwidthStats(r.Context(), dur, host, limit)
+	if err != nil {
+		writeInternalError(w, err, "get bandwidth stats")
+		return
+	}
+	writeJSON(w, stats)
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	dur := parseRange(r.URL.Query().Get("range"), 24*time.Hour)
+	host := r.URL.Query().Get("host")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	// Session timeout in seconds (default 30 minutes)
+	sessionTimeout := 0 // 0 means use default
+	if t := r.URL.Query().Get("timeout"); t != "" {
+		if v, err := strconv.Atoi(t); err == nil && v > 0 {
+			sessionTimeout = v
+		}
+	}
+	sessions, err := s.store.VisitorSessions(r.Context(), dur, host, limit, sessionTimeout)
+	if err != nil {
+		writeInternalError(w, err, "get visitor sessions")
+		return
+	}
+	writeJSON(w, sessions)
+}
+
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		writeErrorWithCode(w, http.StatusInternalServerError, "streaming unsupported", "STREAMING_UNSUPPORTED")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -530,7 +598,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	ch, cancel := s.hub.Subscribe()
 	if ch == nil {
 		// Hub is closed (server shutting down)
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "service unavailable", "SERVICE_UNAVAILABLE")
 		return
 	}
 	defer cancel()
@@ -591,6 +659,29 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
+// APIError represents a structured JSON error response.
+type APIError struct {
+	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
+	Details string `json:"details,omitempty"`
+}
+
+// writeErrorWithCode writes a structured JSON error response with a machine-readable error code.
+func writeErrorWithCode(w http.ResponseWriter, statusCode int, message, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(APIError{Error: message, Code: code}); err != nil {
+		slog.Warn("failed to write JSON error response", "error", err)
+	}
+}
+
+// writeInternalError writes an internal server error, logging the original error
+// while returning a generic message to the client.
+func writeInternalError(w http.ResponseWriter, err error, context string) {
+	slog.Error("internal error", "context", context, "error", err)
+	writeErrorWithCode(w, http.StatusInternalServerError, "internal server error", "INTERNAL_ERROR")
+}
+
 func parseRange(val string, def time.Duration) time.Duration {
 	if val == "" {
 		return def
@@ -599,4 +690,255 @@ func parseRange(val string, def time.Duration) time.Duration {
 		return d
 	}
 	return def
+}
+
+func (s *Server) handleExportCSV(w http.ResponseWriter, r *http.Request) {
+	dur := parseRange(r.URL.Query().Get("range"), 24*time.Hour)
+	host := r.URL.Query().Get("host")
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=caddystat-export-%s.csv", time.Now().Format("2006-01-02")))
+
+	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
+	// Write header
+	header := []string{
+		"id", "timestamp", "host", "path", "status", "bytes", "ip", "referrer", "user_agent",
+		"response_time_ms", "country", "region", "city", "browser", "browser_version",
+		"os", "os_version", "device_type", "is_bot", "bot_name",
+	}
+	if err := csvWriter.Write(header); err != nil {
+		// At this point content type is already set to CSV, can't return JSON error
+		slog.Warn("failed to write CSV header", "error", err)
+		return
+	}
+
+	err := s.store.ExportRequests(r.Context(), dur, host, 1000, func(requests []storage.ExportRequest) error {
+		for _, req := range requests {
+			record := []string{
+				strconv.FormatInt(req.ID, 10),
+				req.Timestamp.Format(time.RFC3339),
+				req.Host,
+				req.Path,
+				strconv.Itoa(req.Status),
+				strconv.FormatInt(req.Bytes, 10),
+				req.IP,
+				req.Referrer,
+				req.UserAgent,
+				strconv.FormatFloat(req.ResponseTimeMs, 'f', 2, 64),
+				req.Country,
+				req.Region,
+				req.City,
+				req.Browser,
+				req.BrowserVersion,
+				req.OS,
+				req.OSVersion,
+				req.DeviceType,
+				strconv.FormatBool(req.IsBot),
+				req.BotName,
+			}
+			if err := csvWriter.Write(record); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Warn("failed to export CSV", "error", err)
+	}
+}
+
+func (s *Server) handleExportJSON(w http.ResponseWriter, r *http.Request) {
+	dur := parseRange(r.URL.Query().Get("range"), 24*time.Hour)
+	host := r.URL.Query().Get("host")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=caddystat-export-%s.json", time.Now().Format("2006-01-02")))
+
+	// Write opening bracket
+	if _, err := w.Write([]byte("[\n")); err != nil {
+		return
+	}
+
+	first := true
+	err := s.store.ExportRequests(r.Context(), dur, host, 1000, func(requests []storage.ExportRequest) error {
+		for _, req := range requests {
+			if !first {
+				if _, err := w.Write([]byte(",\n")); err != nil {
+					return err
+				}
+			}
+			first = false
+
+			data, err := json.Marshal(req)
+			if err != nil {
+				return err
+			}
+			if _, err := w.Write(data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Warn("failed to export JSON", "error", err)
+	}
+
+	// Write closing bracket
+	_, _ = w.Write([]byte("\n]"))
+}
+
+func (s *Server) handleExportBackup(w http.ResponseWriter, r *http.Request) {
+	dbPath := s.cfg.DBPath
+
+	// Open the database file for reading
+	file, err := os.Open(dbPath)
+	if err != nil {
+		writeInternalError(w, err, "open database for backup")
+		return
+	}
+	defer file.Close()
+
+	// Get file info for size
+	info, err := file.Stat()
+	if err != nil {
+		writeInternalError(w, err, "stat database for backup")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-sqlite3")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=caddystat-backup-%s.db", time.Now().Format("2006-01-02")))
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+
+	if _, err := io.Copy(w, file); err != nil {
+		slog.Warn("failed to send database backup", "error", err)
+	}
+}
+
+// Site management handlers
+
+func (s *Server) handleSites(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleListSites(w, r)
+	case http.MethodPost:
+		s.handleCreateSite(w, r)
+	default:
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+	}
+}
+
+func (s *Server) handleListSites(w http.ResponseWriter, r *http.Request) {
+	summary, err := s.store.ListSites(r.Context())
+	if err != nil {
+		writeInternalError(w, err, "list sites")
+		return
+	}
+	writeJSON(w, summary)
+}
+
+func (s *Server) handleCreateSite(w http.ResponseWriter, r *http.Request) {
+	var input storage.SiteInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "invalid request body", "INVALID_REQUEST")
+		return
+	}
+
+	if input.Host == "" {
+		writeErrorWithCode(w, http.StatusBadRequest, "host is required", "MISSING_HOST")
+		return
+	}
+
+	// Check if site already exists
+	existing, err := s.store.GetSiteByHost(r.Context(), input.Host)
+	if err != nil {
+		writeInternalError(w, err, "check existing site")
+		return
+	}
+	if existing != nil {
+		writeErrorWithCode(w, http.StatusConflict, "site already exists", "SITE_EXISTS")
+		return
+	}
+
+	site, err := s.store.CreateSite(r.Context(), input)
+	if err != nil {
+		writeInternalError(w, err, "create site")
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, site)
+}
+
+func (s *Server) handleSiteByID(w http.ResponseWriter, r *http.Request) {
+	// Extract site ID from path: /api/sites/{id}
+	path := r.URL.Path
+	prefix := "/api/sites/"
+	if len(path) <= len(prefix) {
+		writeErrorWithCode(w, http.StatusBadRequest, "site ID required", "MISSING_ID")
+		return
+	}
+
+	idStr := path[len(prefix):]
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "invalid site ID", "INVALID_ID")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		s.handleGetSite(w, r, id)
+	case http.MethodPut:
+		s.handleUpdateSite(w, r, id)
+	case http.MethodDelete:
+		s.handleDeleteSite(w, r, id)
+	default:
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+	}
+}
+
+func (s *Server) handleGetSite(w http.ResponseWriter, r *http.Request, id int64) {
+	site, err := s.store.GetSite(r.Context(), id)
+	if err != nil {
+		writeInternalError(w, err, "get site")
+		return
+	}
+	if site == nil {
+		writeErrorWithCode(w, http.StatusNotFound, "site not found", "NOT_FOUND")
+		return
+	}
+	writeJSON(w, site)
+}
+
+func (s *Server) handleUpdateSite(w http.ResponseWriter, r *http.Request, id int64) {
+	var input storage.SiteInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "invalid request body", "INVALID_REQUEST")
+		return
+	}
+
+	site, err := s.store.UpdateSite(r.Context(), id, input)
+	if err != nil {
+		writeInternalError(w, err, "update site")
+		return
+	}
+	if site == nil {
+		writeErrorWithCode(w, http.StatusNotFound, "site not found", "NOT_FOUND")
+		return
+	}
+	writeJSON(w, site)
+}
+
+func (s *Server) handleDeleteSite(w http.ResponseWriter, r *http.Request, id int64) {
+	if err := s.store.DeleteSite(r.Context(), id); err != nil {
+		if err.Error() == "site not found" {
+			writeErrorWithCode(w, http.StatusNotFound, "site not found", "NOT_FOUND")
+			return
+		}
+		writeInternalError(w, err, "delete site")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

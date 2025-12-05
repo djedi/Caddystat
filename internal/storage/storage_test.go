@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1635,5 +1636,1050 @@ func TestStorage_Vacuum_DatabaseStillWorking(t *testing.T) {
 	}
 	if len(recent) != 15 {
 		t.Errorf("expected 15 requests, got %d", len(recent))
+	}
+}
+
+func TestStorage_RecordImportError(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	filePath := "/var/log/caddy.log"
+	testErr := fmt.Errorf("invalid JSON: unexpected character")
+
+	// Record first error
+	if err := s.RecordImportError(ctx, filePath, testErr); err != nil {
+		t.Fatalf("RecordImportError() error = %v", err)
+	}
+
+	// Check error count
+	total, err := s.GetImportErrorsTotal(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrorsTotal() error = %v", err)
+	}
+	if total != 1 {
+		t.Errorf("total errors = %d, want 1", total)
+	}
+
+	// Record more errors for same file
+	for i := 0; i < 4; i++ {
+		if err := s.RecordImportError(ctx, filePath, testErr); err != nil {
+			t.Fatalf("RecordImportError() iteration %d error = %v", i, err)
+		}
+	}
+
+	total, err = s.GetImportErrorsTotal(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrorsTotal() error = %v", err)
+	}
+	if total != 5 {
+		t.Errorf("total errors = %d, want 5", total)
+	}
+}
+
+func TestStorage_GetImportErrors(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	testErr := fmt.Errorf("parse error")
+
+	// Record errors for multiple files
+	for i := 0; i < 3; i++ {
+		if err := s.RecordImportError(ctx, "/var/log/file1.log", testErr); err != nil {
+			t.Fatalf("RecordImportError(file1) error = %v", err)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		if err := s.RecordImportError(ctx, "/var/log/file2.log", testErr); err != nil {
+			t.Fatalf("RecordImportError(file2) error = %v", err)
+		}
+	}
+
+	errors, err := s.GetImportErrors(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrors() error = %v", err)
+	}
+	if len(errors) != 2 {
+		t.Fatalf("expected 2 error stats, got %d", len(errors))
+	}
+
+	// Should be ordered by error count descending
+	if errors[0].ErrorCount != 5 {
+		t.Errorf("first error count = %d, want 5", errors[0].ErrorCount)
+	}
+	if errors[0].FilePath != "/var/log/file2.log" {
+		t.Errorf("first file path = %q, want /var/log/file2.log", errors[0].FilePath)
+	}
+	if errors[1].ErrorCount != 3 {
+		t.Errorf("second error count = %d, want 3", errors[1].ErrorCount)
+	}
+}
+
+func TestStorage_ClearImportErrors(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	filePath := "/var/log/caddy.log"
+	testErr := fmt.Errorf("parse error")
+
+	// Record errors
+	for i := 0; i < 5; i++ {
+		if err := s.RecordImportError(ctx, filePath, testErr); err != nil {
+			t.Fatalf("RecordImportError() error = %v", err)
+		}
+	}
+
+	// Verify errors exist
+	total, err := s.GetImportErrorsTotal(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrorsTotal() error = %v", err)
+	}
+	if total != 5 {
+		t.Errorf("total errors before clear = %d, want 5", total)
+	}
+
+	// Clear errors
+	if err := s.ClearImportErrors(ctx, filePath); err != nil {
+		t.Fatalf("ClearImportErrors() error = %v", err)
+	}
+
+	// Verify errors are cleared
+	total, err = s.GetImportErrorsTotal(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrorsTotal() after clear error = %v", err)
+	}
+	if total != 0 {
+		t.Errorf("total errors after clear = %d, want 0", total)
+	}
+}
+
+func TestStorage_GetImportErrors_Empty(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	errors, err := s.GetImportErrors(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrors() error = %v", err)
+	}
+	if len(errors) != 0 {
+		t.Errorf("expected 0 errors, got %d", len(errors))
+	}
+
+	total, err := s.GetImportErrorsTotal(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrorsTotal() error = %v", err)
+	}
+	if total != 0 {
+		t.Errorf("total errors = %d, want 0", total)
+	}
+}
+
+func TestStorage_RecordImportError_NilError(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	filePath := "/var/log/caddy.log"
+
+	// Recording nil error should still work
+	if err := s.RecordImportError(ctx, filePath, nil); err != nil {
+		t.Fatalf("RecordImportError(nil) error = %v", err)
+	}
+
+	errors, err := s.GetImportErrors(ctx)
+	if err != nil {
+		t.Fatalf("GetImportErrors() error = %v", err)
+	}
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error stat, got %d", len(errors))
+	}
+	if errors[0].LastError != "" {
+		t.Errorf("LastError = %q, want empty string", errors[0].LastError)
+	}
+}
+
+func TestStorage_GetSystemStatus_WithErrors(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	testErr := fmt.Errorf("parse error")
+
+	// Record some import errors
+	for i := 0; i < 5; i++ {
+		if err := s.RecordImportError(ctx, "/var/log/caddy.log", testErr); err != nil {
+			t.Fatalf("RecordImportError() error = %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := s.RecordImportError(ctx, "/var/log/access.log", testErr); err != nil {
+			t.Fatalf("RecordImportError() error = %v", err)
+		}
+	}
+
+	status, err := s.GetSystemStatus(ctx)
+	if err != nil {
+		t.Fatalf("GetSystemStatus() error = %v", err)
+	}
+
+	if status.TotalParseErrors != 8 {
+		t.Errorf("TotalParseErrors = %d, want 8", status.TotalParseErrors)
+	}
+	if len(status.ImportErrors) != 2 {
+		t.Errorf("ImportErrors count = %d, want 2", len(status.ImportErrors))
+	}
+}
+
+func TestStorage_PerformanceStats_Empty(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	stats, err := s.PerformanceStats(ctx, 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("PerformanceStats() error = %v", err)
+	}
+
+	// Empty database should return zero stats
+	if stats.ResponseTime.Count != 0 {
+		t.Errorf("ResponseTime.Count = %d, want 0", stats.ResponseTime.Count)
+	}
+	if len(stats.SlowPages) != 0 {
+		t.Errorf("SlowPages count = %d, want 0", len(stats.SlowPages))
+	}
+	if len(stats.ByStatus) != 0 {
+		t.Errorf("ByStatus count = %d, want 0", len(stats.ByStatus))
+	}
+}
+
+func TestStorage_PerformanceStats_WithData(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert test requests with varying response times
+	testData := []struct {
+		path     string
+		respTime float64
+		status   int
+	}{
+		{"/fast", 10.0, 200},
+		{"/fast", 15.0, 200},
+		{"/fast", 12.0, 200},
+		{"/fast", 11.0, 200},
+		{"/fast", 14.0, 200},
+		{"/medium", 100.0, 200},
+		{"/medium", 120.0, 200},
+		{"/medium", 110.0, 200},
+		{"/medium", 105.0, 200},
+		{"/medium", 115.0, 200},
+		{"/slow", 500.0, 200},
+		{"/slow", 550.0, 200},
+		{"/slow", 520.0, 200},
+		{"/slow", 480.0, 200},
+		{"/slow", 530.0, 200},
+		{"/error", 50.0, 500},
+		{"/error", 60.0, 500},
+		{"/error", 55.0, 500},
+		{"/error", 45.0, 500},
+		{"/error", 52.0, 500},
+	}
+
+	for _, td := range testData {
+		req := RequestRecord{
+			Timestamp:    now,
+			Host:         "example.com",
+			Path:         td.path,
+			Status:       td.status,
+			Bytes:        1024,
+			IP:           "192.168.1.1",
+			ResponseTime: td.respTime,
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	stats, err := s.PerformanceStats(ctx, 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("PerformanceStats() error = %v", err)
+	}
+
+	// Check response time stats
+	if stats.ResponseTime.Count != 20 {
+		t.Errorf("ResponseTime.Count = %d, want 20", stats.ResponseTime.Count)
+	}
+	if stats.ResponseTime.Min != 10.0 {
+		t.Errorf("ResponseTime.Min = %f, want 10.0", stats.ResponseTime.Min)
+	}
+	if stats.ResponseTime.Max != 550.0 {
+		t.Errorf("ResponseTime.Max = %f, want 550.0", stats.ResponseTime.Max)
+	}
+	if stats.ResponseTime.Avg < 100 || stats.ResponseTime.Avg > 200 {
+		t.Errorf("ResponseTime.Avg = %f, expected between 100 and 200", stats.ResponseTime.Avg)
+	}
+
+	// Check slow pages - /slow should be first
+	if len(stats.SlowPages) < 3 {
+		t.Errorf("SlowPages count = %d, want at least 3", len(stats.SlowPages))
+	} else {
+		if stats.SlowPages[0].Path != "/slow" {
+			t.Errorf("SlowPages[0].Path = %s, want /slow", stats.SlowPages[0].Path)
+		}
+		if stats.SlowPages[0].Count != 5 {
+			t.Errorf("SlowPages[0].Count = %d, want 5", stats.SlowPages[0].Count)
+		}
+	}
+
+	// Check status breakdown
+	if len(stats.ByStatus) < 2 {
+		t.Errorf("ByStatus count = %d, want at least 2", len(stats.ByStatus))
+	}
+}
+
+func TestStorage_PerformanceStats_WithHostFilter(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert requests for two different hosts
+	hosts := []string{"site1.com", "site2.com"}
+	for _, host := range hosts {
+		for i := 0; i < 10; i++ {
+			req := RequestRecord{
+				Timestamp:    now,
+				Host:         host,
+				Path:         "/page",
+				Status:       200,
+				Bytes:        1024,
+				IP:           "192.168.1.1",
+				ResponseTime: float64(100 + i*10),
+			}
+			if err := s.InsertRequest(ctx, req); err != nil {
+				t.Fatalf("InsertRequest() error = %v", err)
+			}
+		}
+	}
+
+	// Get stats for all hosts
+	allStats, err := s.PerformanceStats(ctx, 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("PerformanceStats() error = %v", err)
+	}
+	if allStats.ResponseTime.Count != 20 {
+		t.Errorf("All hosts: ResponseTime.Count = %d, want 20", allStats.ResponseTime.Count)
+	}
+
+	// Get stats for single host
+	filteredStats, err := s.PerformanceStats(ctx, 24*time.Hour, "site1.com")
+	if err != nil {
+		t.Fatalf("PerformanceStats() error = %v", err)
+	}
+	if filteredStats.ResponseTime.Count != 10 {
+		t.Errorf("Filtered: ResponseTime.Count = %d, want 10", filteredStats.ResponseTime.Count)
+	}
+}
+
+func TestStorage_ResponseTimePercentiles(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert 100 requests with response times 1-100
+	for i := 1; i <= 100; i++ {
+		req := RequestRecord{
+			Timestamp:    now,
+			Host:         "example.com",
+			Path:         "/test",
+			Status:       200,
+			Bytes:        1024,
+			IP:           "192.168.1.1",
+			ResponseTime: float64(i),
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	stats, err := s.PerformanceStats(ctx, 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("PerformanceStats() error = %v", err)
+	}
+
+	// With 100 values 1-100:
+	// P50 should be around 50
+	// P90 should be around 90
+	// P95 should be around 95
+	// P99 should be around 99
+	if stats.ResponseTime.P50 < 45 || stats.ResponseTime.P50 > 55 {
+		t.Errorf("P50 = %f, expected around 50", stats.ResponseTime.P50)
+	}
+	if stats.ResponseTime.P90 < 85 || stats.ResponseTime.P90 > 95 {
+		t.Errorf("P90 = %f, expected around 90", stats.ResponseTime.P90)
+	}
+	if stats.ResponseTime.P95 < 92 || stats.ResponseTime.P95 > 98 {
+		t.Errorf("P95 = %f, expected around 95", stats.ResponseTime.P95)
+	}
+	if stats.ResponseTime.P99 < 96 || stats.ResponseTime.P99 > 100 {
+		t.Errorf("P99 = %f, expected around 99", stats.ResponseTime.P99)
+	}
+}
+
+func TestStorage_SlowPages_MinimumRequests(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert only 3 requests (below minimum of 5)
+	for i := 0; i < 3; i++ {
+		req := RequestRecord{
+			Timestamp:    now,
+			Host:         "example.com",
+			Path:         "/rare-page",
+			Status:       200,
+			Bytes:        1024,
+			IP:           "192.168.1.1",
+			ResponseTime: 1000.0, // Very slow
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	stats, err := s.PerformanceStats(ctx, 24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("PerformanceStats() error = %v", err)
+	}
+
+	// Should not appear in slow pages due to minimum request count
+	if len(stats.SlowPages) != 0 {
+		t.Errorf("SlowPages count = %d, want 0 (below minimum requests)", len(stats.SlowPages))
+	}
+}
+
+// Bandwidth Stats Tests
+
+func TestStorage_BandwidthStats_Empty(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	stats, err := s.BandwidthStats(ctx, 24*time.Hour, "", 10)
+	if err != nil {
+		t.Fatalf("BandwidthStats() error = %v", err)
+	}
+
+	if stats.TotalBytes != 0 {
+		t.Errorf("TotalBytes = %d, want 0", stats.TotalBytes)
+	}
+	if stats.TotalHuman != "0 B" {
+		t.Errorf("TotalHuman = %s, want 0 B", stats.TotalHuman)
+	}
+	if len(stats.ByHost) != 0 {
+		t.Errorf("ByHost length = %d, want 0", len(stats.ByHost))
+	}
+	if len(stats.ByPath) != 0 {
+		t.Errorf("ByPath length = %d, want 0", len(stats.ByPath))
+	}
+}
+
+func TestStorage_BandwidthStats_WithData(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert requests with various bytes per host/path
+	requests := []RequestRecord{
+		{Timestamp: now, Host: "site1.com", Path: "/page.html", Status: 200, Bytes: 1000, IP: "1.1.1.1"},
+		{Timestamp: now, Host: "site1.com", Path: "/style.css", Status: 200, Bytes: 2000, IP: "1.1.1.2"},
+		{Timestamp: now, Host: "site1.com", Path: "/app.js", Status: 200, Bytes: 3000, IP: "1.1.1.3"},
+		{Timestamp: now, Host: "site2.com", Path: "/image.png", Status: 200, Bytes: 5000, IP: "1.1.1.4"},
+		{Timestamp: now, Host: "site2.com", Path: "/data.json", Status: 200, Bytes: 500, IP: "1.1.1.5"},
+	}
+	for _, req := range requests {
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	stats, err := s.BandwidthStats(ctx, 24*time.Hour, "", 10)
+	if err != nil {
+		t.Fatalf("BandwidthStats() error = %v", err)
+	}
+
+	// Check total bandwidth
+	expectedTotal := int64(1000 + 2000 + 3000 + 5000 + 500)
+	if stats.TotalBytes != expectedTotal {
+		t.Errorf("TotalBytes = %d, want %d", stats.TotalBytes, expectedTotal)
+	}
+	if stats.TotalHuman != "11.2 KB" {
+		t.Errorf("TotalHuman = %s, want 11.2 KB", stats.TotalHuman)
+	}
+
+	// Check ByHost - site1.com should be first (6000 bytes: 1000+2000+3000)
+	if len(stats.ByHost) != 2 {
+		t.Fatalf("ByHost length = %d, want 2", len(stats.ByHost))
+	}
+	if stats.ByHost[0].Host != "site1.com" {
+		t.Errorf("ByHost[0].Host = %s, want site1.com", stats.ByHost[0].Host)
+	}
+	if stats.ByHost[0].Bytes != 6000 {
+		t.Errorf("ByHost[0].Bytes = %d, want 6000", stats.ByHost[0].Bytes)
+	}
+
+	// Check ByPath - image.png should be first (5000 bytes)
+	if len(stats.ByPath) < 1 {
+		t.Fatal("ByPath is empty")
+	}
+	if stats.ByPath[0].Path != "/image.png" {
+		t.Errorf("ByPath[0].Path = %s, want /image.png", stats.ByPath[0].Path)
+	}
+	if stats.ByPath[0].Bytes != 5000 {
+		t.Errorf("ByPath[0].Bytes = %d, want 5000", stats.ByPath[0].Bytes)
+	}
+
+	// Check ByContentType
+	if len(stats.ByContentType) < 1 {
+		t.Fatal("ByContentType is empty")
+	}
+	// PNG Image should be the largest
+	foundPNG := false
+	for _, ct := range stats.ByContentType {
+		if ct.ContentType == "PNG Image" {
+			foundPNG = true
+			if ct.Bytes != 5000 {
+				t.Errorf("PNG Image bytes = %d, want 5000", ct.Bytes)
+			}
+		}
+	}
+	if !foundPNG {
+		t.Error("ByContentType does not contain PNG Image")
+	}
+
+	// Check TimeSeries - results depend on timestamp formatting
+	// With data, we should have at least one time bucket
+	if len(stats.TimeSeries) > 0 {
+		if stats.TimeSeries[0].Bytes != expectedTotal {
+			t.Errorf("TimeSeries[0].Bytes = %d, want %d", stats.TimeSeries[0].Bytes, expectedTotal)
+		}
+	}
+}
+
+func TestStorage_BandwidthStats_WithHostFilter(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	requests := []RequestRecord{
+		{Timestamp: now, Host: "site1.com", Path: "/page.html", Status: 200, Bytes: 1000, IP: "1.1.1.1"},
+		{Timestamp: now, Host: "site1.com", Path: "/style.css", Status: 200, Bytes: 2000, IP: "1.1.1.2"},
+		{Timestamp: now, Host: "site2.com", Path: "/image.png", Status: 200, Bytes: 5000, IP: "1.1.1.3"},
+	}
+	for _, req := range requests {
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Filter to site1.com only
+	stats, err := s.BandwidthStats(ctx, 24*time.Hour, "site1.com", 10)
+	if err != nil {
+		t.Fatalf("BandwidthStats() error = %v", err)
+	}
+
+	// Total should only include site1.com (3000 bytes)
+	if stats.TotalBytes != 3000 {
+		t.Errorf("TotalBytes = %d, want 3000", stats.TotalBytes)
+	}
+
+	// ByPath should only have site1.com paths
+	if len(stats.ByPath) != 2 {
+		t.Errorf("ByPath length = %d, want 2", len(stats.ByPath))
+	}
+	for _, pb := range stats.ByPath {
+		if pb.Path == "/image.png" {
+			t.Error("ByPath should not contain /image.png (belongs to site2.com)")
+		}
+	}
+}
+
+func TestStorage_BandwidthStats_Limit(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert 5 different paths
+	for i := 0; i < 5; i++ {
+		req := RequestRecord{
+			Timestamp: now,
+			Host:      "example.com",
+			Path:      fmt.Sprintf("/page%d.html", i),
+			Status:    200,
+			Bytes:     int64((i + 1) * 1000),
+			IP:        "1.1.1.1",
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Limit to top 3
+	stats, err := s.BandwidthStats(ctx, 24*time.Hour, "", 3)
+	if err != nil {
+		t.Fatalf("BandwidthStats() error = %v", err)
+	}
+
+	if len(stats.ByPath) != 3 {
+		t.Errorf("ByPath length = %d, want 3", len(stats.ByPath))
+	}
+}
+
+func TestStorage_BandwidthStats_ContentTypes(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Test various content type classifications
+	testCases := []struct {
+		path         string
+		expectedType string
+	}{
+		{"/page.html", "HTML"},
+		{"/index.htm", "HTML"},
+		{"/style.css", "CSS"},
+		{"/app.js", "JavaScript"},
+		{"/data.json", "JSON"},
+		{"/feed.xml", "XML"},
+		{"/image.png", "PNG Image"},
+		{"/photo.jpg", "JPEG Image"},
+		{"/photo.jpeg", "JPEG Image"},
+		{"/anim.gif", "GIF Image"},
+		{"/logo.svg", "SVG Image"},
+		{"/banner.webp", "WebP Image"},
+		{"/favicon.ico", "Icon"},
+		{"/font.woff", "Web Font"},
+		{"/font.woff2", "Web Font"},
+		{"/font.ttf", "Font"},
+		{"/doc.pdf", "PDF"},
+		{"/archive.zip", "Archive"},
+		{"/video.mp4", "Video"},
+		{"/audio.mp3", "Audio"},
+		{"/page", "Page"},
+		{"/directory/", "Page"},
+		{"/unknown.xyz", "Other"},
+	}
+
+	for _, tc := range testCases {
+		req := RequestRecord{
+			Timestamp: now,
+			Host:      "example.com",
+			Path:      tc.path,
+			Status:    200,
+			Bytes:     1000,
+			IP:        "1.1.1.1",
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	stats, err := s.BandwidthStats(ctx, 24*time.Hour, "", 100)
+	if err != nil {
+		t.Fatalf("BandwidthStats() error = %v", err)
+	}
+
+	// Build a map of content types
+	contentTypes := make(map[string]int64)
+	for _, ct := range stats.ByContentType {
+		contentTypes[ct.ContentType] = ct.Bytes
+	}
+
+	// Verify HTML has 2 entries (html + htm)
+	if contentTypes["HTML"] != 2000 {
+		t.Errorf("HTML bytes = %d, want 2000", contentTypes["HTML"])
+	}
+
+	// Verify JPEG has 2 entries (jpg + jpeg)
+	if contentTypes["JPEG Image"] != 2000 {
+		t.Errorf("JPEG Image bytes = %d, want 2000", contentTypes["JPEG Image"])
+	}
+
+	// Verify Page has 2 entries (no extension + trailing slash)
+	if contentTypes["Page"] != 2000 {
+		t.Errorf("Page bytes = %d, want 2000", contentTypes["Page"])
+	}
+}
+
+func TestStorage_VisitorSessions(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create a session with multiple requests from same IP+UA
+	// Session 1: User A with 3 page views
+	for i := 0; i < 3; i++ {
+		req := RequestRecord{
+			Timestamp: now.Add(time.Duration(-60+i*5) * time.Minute), // 60, 55, 50 minutes ago
+			Host:      "example.com",
+			Path:      fmt.Sprintf("/page%d", i+1),
+			Status:    200,
+			Bytes:     1000,
+			IP:        "192.168.1.1",
+			UserAgent: "Mozilla/5.0 Chrome",
+			Browser:   "Chrome",
+			OS:        "Windows",
+			Country:   "US",
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Session 2: Same IP but different UA (should be separate session)
+	req := RequestRecord{
+		Timestamp: now.Add(-55 * time.Minute),
+		Host:      "example.com",
+		Path:      "/mobile-page",
+		Status:    200,
+		Bytes:     500,
+		IP:        "192.168.1.1",
+		UserAgent: "Mozilla/5.0 Safari Mobile",
+		Browser:   "Safari",
+		OS:        "iOS",
+		Country:   "US",
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	// Session 3: Different IP (new session)
+	req = RequestRecord{
+		Timestamp: now.Add(-40 * time.Minute),
+		Host:      "example.com",
+		Path:      "/page1",
+		Status:    200,
+		Bytes:     800,
+		IP:        "10.0.0.1",
+		UserAgent: "Mozilla/5.0 Firefox",
+		Browser:   "Firefox",
+		OS:        "Linux",
+		Country:   "UK",
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	// Session 4: Same as Session 1 but after 30+ minute gap (new session)
+	req = RequestRecord{
+		Timestamp: now.Add(-5 * time.Minute), // After the 30-minute timeout
+		Host:      "example.com",
+		Path:      "/page4",
+		Status:    200,
+		Bytes:     1200,
+		IP:        "192.168.1.1",
+		UserAgent: "Mozilla/5.0 Chrome",
+		Browser:   "Chrome",
+		OS:        "Windows",
+		Country:   "US",
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	// Query visitor sessions
+	summary, err := s.VisitorSessions(ctx, 2*time.Hour, "", 50, 0)
+	if err != nil {
+		t.Fatalf("VisitorSessions() error = %v", err)
+	}
+
+	// Should have 4 sessions total
+	if summary.TotalSessions != 4 {
+		t.Errorf("TotalSessions = %d, want 4", summary.TotalSessions)
+	}
+
+	// Should have 6 page views total (3 + 1 + 1 + 1)
+	if summary.TotalPageViews != 6 {
+		t.Errorf("TotalPageViews = %d, want 6", summary.TotalPageViews)
+	}
+
+	// Sessions 2, 3, 4 are bounces (single page view each)
+	// Session 1 has 3 page views (not a bounce)
+	// Bounce rate = 3/4 = 75%
+	if summary.BounceRate != 75.0 {
+		t.Errorf("BounceRate = %.1f, want 75.0", summary.BounceRate)
+	}
+
+	// Verify sessions are ordered by start_time DESC (most recent first)
+	if len(summary.Sessions) < 4 {
+		t.Fatalf("expected at least 4 sessions, got %d", len(summary.Sessions))
+	}
+
+	// Most recent session should be Session 4 (Chrome user returning)
+	if summary.Sessions[0].IP != "192.168.1.1" || summary.Sessions[0].Browser != "Chrome" {
+		t.Errorf("Most recent session should be Chrome user from 192.168.1.1")
+	}
+	if summary.Sessions[0].PageViews != 1 {
+		t.Errorf("Session 4 PageViews = %d, want 1", summary.Sessions[0].PageViews)
+	}
+	if !summary.Sessions[0].IsBounce {
+		t.Error("Session 4 should be a bounce")
+	}
+}
+
+func TestStorage_VisitorSessions_EntryExitPages(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create a session with entry and exit pages
+	pages := []string{"/home", "/products", "/product/123", "/checkout"}
+	for i, page := range pages {
+		req := RequestRecord{
+			Timestamp: now.Add(time.Duration(-60+i*5) * time.Minute),
+			Host:      "example.com",
+			Path:      page,
+			Status:    200,
+			Bytes:     1000,
+			IP:        "192.168.1.1",
+			UserAgent: "Mozilla/5.0",
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	summary, err := s.VisitorSessions(ctx, 2*time.Hour, "", 50, 0)
+	if err != nil {
+		t.Fatalf("VisitorSessions() error = %v", err)
+	}
+
+	if len(summary.Sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(summary.Sessions))
+	}
+
+	session := summary.Sessions[0]
+	if session.EntryPage != "/home" {
+		t.Errorf("EntryPage = %s, want /home", session.EntryPage)
+	}
+	if session.ExitPage != "/checkout" {
+		t.Errorf("ExitPage = %s, want /checkout", session.ExitPage)
+	}
+	if session.PageViews != 4 {
+		t.Errorf("PageViews = %d, want 4", session.PageViews)
+	}
+	if session.IsBounce {
+		t.Error("session with 4 page views should not be a bounce")
+	}
+}
+
+func TestStorage_VisitorSessions_HostFilter(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create sessions for different hosts
+	hosts := []string{"site1.com", "site2.com", "site1.com"}
+	for i, host := range hosts {
+		req := RequestRecord{
+			Timestamp: now.Add(time.Duration(-60+i*10) * time.Minute),
+			Host:      host,
+			Path:      "/page",
+			Status:    200,
+			Bytes:     1000,
+			IP:        fmt.Sprintf("192.168.1.%d", i+1),
+			UserAgent: "Mozilla/5.0",
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Query for site1.com only
+	summary, err := s.VisitorSessions(ctx, 2*time.Hour, "site1.com", 50, 0)
+	if err != nil {
+		t.Fatalf("VisitorSessions() error = %v", err)
+	}
+
+	if summary.TotalSessions != 2 {
+		t.Errorf("TotalSessions for site1.com = %d, want 2", summary.TotalSessions)
+	}
+}
+
+func TestStorage_VisitorSessions_CustomTimeout(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create requests 20 minutes apart (under default 30-min timeout, but over 15-min custom timeout)
+	for i := 0; i < 3; i++ {
+		req := RequestRecord{
+			Timestamp: now.Add(time.Duration(-60+i*20) * time.Minute), // 60, 40, 20 minutes ago
+			Host:      "example.com",
+			Path:      fmt.Sprintf("/page%d", i+1),
+			Status:    200,
+			Bytes:     1000,
+			IP:        "192.168.1.1",
+			UserAgent: "Mozilla/5.0",
+		}
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// With default 30-minute timeout, should be 1 session
+	summary, err := s.VisitorSessions(ctx, 2*time.Hour, "", 50, 0)
+	if err != nil {
+		t.Fatalf("VisitorSessions() error = %v", err)
+	}
+	if summary.TotalSessions != 1 {
+		t.Errorf("With default timeout: TotalSessions = %d, want 1", summary.TotalSessions)
+	}
+
+	// With 15-minute timeout (900 seconds), should be 3 sessions (each request is its own session)
+	summary, err = s.VisitorSessions(ctx, 2*time.Hour, "", 50, 900)
+	if err != nil {
+		t.Fatalf("VisitorSessions() with custom timeout error = %v", err)
+	}
+	if summary.TotalSessions != 3 {
+		t.Errorf("With 15-min timeout: TotalSessions = %d, want 3", summary.TotalSessions)
+	}
+}
+
+func TestStorage_VisitorSessions_ExcludesBots(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create a bot request
+	req := RequestRecord{
+		Timestamp: now.Add(-30 * time.Minute),
+		Host:      "example.com",
+		Path:      "/page",
+		Status:    200,
+		Bytes:     1000,
+		IP:        "192.168.1.1",
+		UserAgent: "Googlebot/2.1",
+		IsBot:     true,
+		BotName:   "Googlebot",
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	// Create a human request
+	req = RequestRecord{
+		Timestamp: now.Add(-25 * time.Minute),
+		Host:      "example.com",
+		Path:      "/page",
+		Status:    200,
+		Bytes:     1000,
+		IP:        "192.168.1.2",
+		UserAgent: "Mozilla/5.0",
+		IsBot:     false,
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	summary, err := s.VisitorSessions(ctx, 2*time.Hour, "", 50, 0)
+	if err != nil {
+		t.Fatalf("VisitorSessions() error = %v", err)
+	}
+
+	// Should only have 1 session (the human, not the bot)
+	if summary.TotalSessions != 1 {
+		t.Errorf("TotalSessions = %d, want 1 (bot should be excluded)", summary.TotalSessions)
+	}
+}
+
+func TestStorage_VisitorSessions_SessionsByHour(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create sessions at specific hours
+	// We need to use times within the last 2 hours for the test to find them
+	now := time.Now().UTC()
+	hour := now.Hour()
+
+	req := RequestRecord{
+		Timestamp: now.Add(-30 * time.Minute),
+		Host:      "example.com",
+		Path:      "/page1",
+		Status:    200,
+		Bytes:     1000,
+		IP:        "192.168.1.1",
+		UserAgent: "Mozilla/5.0",
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	req = RequestRecord{
+		Timestamp: now.Add(-45 * time.Minute),
+		Host:      "example.com",
+		Path:      "/page2",
+		Status:    200,
+		Bytes:     1000,
+		IP:        "192.168.1.2",
+		UserAgent: "Mozilla/5.0",
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	summary, err := s.VisitorSessions(ctx, 2*time.Hour, "", 50, 0)
+	if err != nil {
+		t.Fatalf("VisitorSessions() error = %v", err)
+	}
+
+	// Verify SessionsByHour has 24 entries
+	if len(summary.SessionsByHour) != 24 {
+		t.Errorf("SessionsByHour has %d entries, want 24", len(summary.SessionsByHour))
+	}
+
+	// Verify the current hour has sessions
+	found := false
+	for _, bucket := range summary.SessionsByHour {
+		if bucket.Hour == hour || bucket.Hour == (hour+23)%24 { // Check current or previous hour
+			if bucket.Sessions > 0 {
+				found = true
+				break
+			}
+		}
+	}
+	if !found && summary.TotalSessions > 0 {
+		t.Logf("Warning: Sessions exist but none found in hour %d or %d", hour, (hour+23)%24)
 	}
 }

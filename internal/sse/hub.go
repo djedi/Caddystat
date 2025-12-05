@@ -1,6 +1,18 @@
 package sse
 
-import "sync"
+import (
+	"log/slog"
+	"sync"
+	"sync/atomic"
+)
+
+// DefaultBufferSize is the default channel buffer size for SSE clients.
+const DefaultBufferSize = 32
+
+// DroppedCounter is an interface for recording dropped SSE messages.
+type DroppedCounter interface {
+	RecordSSEDropped()
+}
 
 // Event represents an SSE event with a type and payload
 type Event struct {
@@ -10,13 +22,43 @@ type Event struct {
 
 // Hub is a minimal SSE broadcaster.
 type Hub struct {
-	mu      sync.Mutex
-	clients map[chan Event]struct{}
-	closed  bool
+	mu             sync.Mutex
+	clients        map[chan Event]struct{}
+	closed         bool
+	bufferSize     int
+	droppedCounter DroppedCounter
+	droppedTotal   atomic.Uint64
 }
 
-func NewHub() *Hub {
-	return &Hub{clients: make(map[chan Event]struct{})}
+// HubOption configures Hub behavior.
+type HubOption func(*Hub)
+
+// WithBufferSize sets the channel buffer size for new subscribers.
+func WithBufferSize(size int) HubOption {
+	return func(h *Hub) {
+		if size > 0 {
+			h.bufferSize = size
+		}
+	}
+}
+
+// WithDroppedCounter sets the counter for tracking dropped messages.
+func WithDroppedCounter(counter DroppedCounter) HubOption {
+	return func(h *Hub) {
+		h.droppedCounter = counter
+	}
+}
+
+// NewHub creates a new SSE hub with the given options.
+func NewHub(opts ...HubOption) *Hub {
+	h := &Hub{
+		clients:    make(map[chan Event]struct{}),
+		bufferSize: DefaultBufferSize,
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Close closes all client connections and prevents new subscriptions.
@@ -53,7 +95,7 @@ func (h *Hub) Subscribe() (<-chan Event, func()) {
 		h.mu.Unlock()
 		return nil, nil
 	}
-	ch := make(chan Event, 10)
+	ch := make(chan Event, h.bufferSize)
 	h.clients[ch] = struct{}{}
 	h.mu.Unlock()
 	return ch, func() {
@@ -71,7 +113,9 @@ func (h *Hub) Broadcast(payload []byte) {
 	h.BroadcastEvent("", payload)
 }
 
-// BroadcastEvent sends a named event to all subscribers
+// BroadcastEvent sends a named event to all subscribers.
+// If a client's buffer is full, the message is dropped for that client.
+// Dropped messages are logged and counted for monitoring.
 func (h *Hub) BroadcastEvent(eventType string, payload []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -79,6 +123,29 @@ func (h *Hub) BroadcastEvent(eventType string, payload []byte) {
 		select {
 		case ch <- Event{Type: eventType, Payload: payload}:
 		default:
+			// Client buffer full - message dropped
+			dropped := h.droppedTotal.Add(1)
+			if h.droppedCounter != nil {
+				h.droppedCounter.RecordSSEDropped()
+			}
+			// Log at debug level to avoid spam, but include total count
+			slog.Debug("SSE message dropped for slow client",
+				"event_type", eventType,
+				"total_dropped", dropped,
+				"clients", len(h.clients))
 		}
 	}
+}
+
+// DroppedTotal returns the total number of messages dropped since startup.
+func (h *Hub) DroppedTotal() uint64 {
+	return h.droppedTotal.Load()
+}
+
+// SetDroppedCounter sets the counter for recording dropped messages.
+// This allows setting the counter after hub creation to resolve circular dependencies.
+func (h *Hub) SetDroppedCounter(counter DroppedCounter) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.droppedCounter = counter
 }

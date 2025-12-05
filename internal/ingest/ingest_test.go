@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -113,9 +115,9 @@ func TestParseCaddyLog_BytesWrittenTakesPrecedence(t *testing.T) {
 
 func TestParseCaddyLog_ClientIPPriority(t *testing.T) {
 	tests := []struct {
-		name     string
-		line     string
-		wantIP   string
+		name   string
+		line   string
+		wantIP string
 	}{
 		{
 			name:   "Cloudflare CF-Connecting-IP",
@@ -164,23 +166,23 @@ func TestParseCaddyLog_ClientIPPriority(t *testing.T) {
 
 func TestParseCaddyLog_ReferrerVariants(t *testing.T) {
 	tests := []struct {
-		name        string
-		line        string
+		name         string
+		line         string
 		wantReferrer string
 	}{
 		{
-			name:        "Referer header (correct spelling)",
-			line:        `{"ts":1700000000,"request":{"host":"example.com","uri":"/","remote_ip":"10.0.0.1","headers":{"Referer":["https://google.com"]}},"status":200}`,
+			name:         "Referer header (correct spelling)",
+			line:         `{"ts":1700000000,"request":{"host":"example.com","uri":"/","remote_ip":"10.0.0.1","headers":{"Referer":["https://google.com"]}},"status":200}`,
 			wantReferrer: "https://google.com",
 		},
 		{
-			name:        "Referrer header (alternate spelling)",
-			line:        `{"ts":1700000000,"request":{"host":"example.com","uri":"/","remote_ip":"10.0.0.1","headers":{"Referrer":["https://bing.com"]}},"status":200}`,
+			name:         "Referrer header (alternate spelling)",
+			line:         `{"ts":1700000000,"request":{"host":"example.com","uri":"/","remote_ip":"10.0.0.1","headers":{"Referrer":["https://bing.com"]}},"status":200}`,
 			wantReferrer: "https://bing.com",
 		},
 		{
-			name:        "No referrer",
-			line:        `{"ts":1700000000,"request":{"host":"example.com","uri":"/","remote_ip":"10.0.0.1"},"status":200}`,
+			name:         "No referrer",
+			line:         `{"ts":1700000000,"request":{"host":"example.com","uri":"/","remote_ip":"10.0.0.1"},"status":200}`,
 			wantReferrer: "",
 		},
 	}
@@ -596,5 +598,162 @@ func TestGeoLookup_CloseNilDB(t *testing.T) {
 	err := g.Close()
 	if err != nil {
 		t.Errorf("Close() = %v, want nil", err)
+	}
+}
+
+func TestIsTransientError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "database is locked",
+			err:  fmt.Errorf("database is locked"),
+			want: true,
+		},
+		{
+			name: "database table is locked",
+			err:  fmt.Errorf("database table is locked"),
+			want: true,
+		},
+		{
+			name: "SQLITE_BUSY error",
+			err:  fmt.Errorf("SQLITE_BUSY: database is busy"),
+			want: true,
+		},
+		{
+			name: "SQLITE_LOCKED error",
+			err:  fmt.Errorf("SQLITE_LOCKED: database locked"),
+			want: true,
+		},
+		{
+			name: "resource temporarily unavailable",
+			err:  fmt.Errorf("resource temporarily unavailable"),
+			want: true,
+		},
+		{
+			name: "too many open files",
+			err:  fmt.Errorf("too many open files"),
+			want: true,
+		},
+		{
+			name: "generic error",
+			err:  fmt.Errorf("some other error"),
+			want: false,
+		},
+		{
+			name: "parse error",
+			err:  fmt.Errorf("invalid JSON"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransientError(tt.err)
+			if got != tt.want {
+				t.Errorf("isTransientError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRetryWithBackoff_Success(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+
+	err := retryWithBackoff(ctx, "test_op", func() error {
+		callCount++
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("retryWithBackoff() error = %v, want nil", err)
+	}
+	if callCount != 1 {
+		t.Errorf("callCount = %d, want 1", callCount)
+	}
+}
+
+func TestRetryWithBackoff_NonTransientError(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+	testErr := fmt.Errorf("non-transient error")
+
+	err := retryWithBackoff(ctx, "test_op", func() error {
+		callCount++
+		return testErr
+	})
+
+	if err != testErr {
+		t.Errorf("retryWithBackoff() error = %v, want %v", err, testErr)
+	}
+	if callCount != 1 {
+		t.Errorf("callCount = %d, want 1 (no retries for non-transient)", callCount)
+	}
+}
+
+func TestRetryWithBackoff_TransientThenSuccess(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+	transientErr := fmt.Errorf("database is locked")
+
+	err := retryWithBackoff(ctx, "test_op", func() error {
+		callCount++
+		if callCount < 3 {
+			return transientErr
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("retryWithBackoff() error = %v, want nil", err)
+	}
+	if callCount != 3 {
+		t.Errorf("callCount = %d, want 3", callCount)
+	}
+}
+
+func TestRetryWithBackoff_MaxRetries(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+	transientErr := fmt.Errorf("database is locked")
+
+	err := retryWithBackoff(ctx, "test_op", func() error {
+		callCount++
+		return transientErr
+	})
+
+	if err != transientErr {
+		t.Errorf("retryWithBackoff() error = %v, want %v", err, transientErr)
+	}
+	// maxRetries is 3, so we should have 4 calls (initial + 3 retries)
+	if callCount != 4 {
+		t.Errorf("callCount = %d, want 4", callCount)
+	}
+}
+
+func TestRetryWithBackoff_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	callCount := 0
+	transientErr := fmt.Errorf("database is locked")
+
+	// Cancel the context after first call
+	err := retryWithBackoff(ctx, "test_op", func() error {
+		callCount++
+		if callCount == 1 {
+			cancel()
+		}
+		return transientErr
+	})
+
+	if err != context.Canceled {
+		t.Errorf("retryWithBackoff() error = %v, want context.Canceled", err)
 	}
 }

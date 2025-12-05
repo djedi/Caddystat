@@ -50,6 +50,8 @@ cd web && npm run dev
 - `MAX_REQUEST_BODY_BYTES` - Maximum request body size in bytes (default: `1048576` = 1MB)
 - `DB_MAX_CONNECTIONS` - Maximum database connections (default: `1`)
 - `DB_QUERY_TIMEOUT` - Query timeout duration (default: `30s`)
+- `BOT_SIGNATURES_PATH` - Comma-separated list of bot signature JSON files (community lists merged with defaults, see `bots.json` for format)
+- `SSE_BUFFER_SIZE` - Channel buffer size for SSE clients (default: `32`)
 
 ## Architecture
 
@@ -87,6 +89,9 @@ web/                      Frontend (Alpine.js + Tailwind, built with PostCSS)
 - `GET /api/stats/hosts` - Top hosts by request count
 - `GET /api/stats/browsers` - Browser usage stats
 - `GET /api/stats/os` - OS usage stats
+- `GET /api/stats/performance?range=24h&host=` - Response time percentiles and slow pages
+- `GET /api/stats/bandwidth?range=24h&host=&limit=10` - Bandwidth statistics per host/path/content type
+- `GET /api/stats/sessions?range=24h&host=&limit=50&timeout=1800` - Visitor session reconstruction (grouped by IP+UA, with entry/exit pages, bounce rate)
 - `GET /api/stats/robots` - Bot/spider stats
 - `GET /api/stats/referrers` - Referrer stats
 - `GET /api/stats/status` - System status (DB size, row counts, last import time)
@@ -97,5 +102,13 @@ web/                      Frontend (Alpine.js + Tailwind, built with PostCSS)
 - `GET /api/auth/check` - Check authentication status
 - `POST /api/auth/login` - Login with username/password
 - `POST /api/auth/logout` - Logout and clear session
+- `GET /api/export/csv?range=24h&host=` - Export requests as CSV
+- `GET /api/export/json?range=24h&host=` - Export requests as JSON
+- `GET /api/export/backup` - Download SQLite database backup
+- `GET /api/sites` - List all sites (configured + discovered from logs)
+- `POST /api/sites` - Create a site configuration (body: `{host, display_name, retention_days, enabled}`)
+- `GET /api/sites/{id}` - Get a specific site by ID
+- `PUT /api/sites/{id}` - Update a site configuration
+- `DELETE /api/sites/{id}` - Delete a site configuration
 - `GET /health` - Health check (DB status, version)
 - `GET /metrics` - Prometheus metrics endpoint

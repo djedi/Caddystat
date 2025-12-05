@@ -225,7 +225,8 @@ func TestHub_ConcurrentOperations(t *testing.T) {
 }
 
 func TestHub_BroadcastDropsWhenBufferFull(t *testing.T) {
-	hub := NewHub()
+	// Use a small buffer size for testing
+	hub := NewHub(WithBufferSize(10))
 	ch, cancel := hub.Subscribe()
 	defer cancel()
 
@@ -247,5 +248,133 @@ func TestHub_BroadcastDropsWhenBufferFull(t *testing.T) {
 done:
 	if count != 10 {
 		t.Errorf("expected 10 buffered messages, got %d", count)
+	}
+
+	// Verify dropped count
+	if hub.DroppedTotal() != 5 {
+		t.Errorf("expected 5 dropped messages, got %d", hub.DroppedTotal())
+	}
+}
+
+func TestHub_WithBufferSize(t *testing.T) {
+	hub := NewHub(WithBufferSize(5))
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	// Fill the buffer
+	for i := 0; i < 8; i++ {
+		hub.Broadcast([]byte("message"))
+	}
+
+	// Should have exactly 5 messages (custom buffer size)
+	count := 0
+	for {
+		select {
+		case <-ch:
+			count++
+		default:
+			goto done
+		}
+	}
+done:
+	if count != 5 {
+		t.Errorf("expected 5 buffered messages, got %d", count)
+	}
+
+	if hub.DroppedTotal() != 3 {
+		t.Errorf("expected 3 dropped messages, got %d", hub.DroppedTotal())
+	}
+}
+
+type mockDroppedCounter struct {
+	count int
+	mu    sync.Mutex
+}
+
+func (m *mockDroppedCounter) RecordSSEDropped() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.count++
+}
+
+func (m *mockDroppedCounter) Count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.count
+}
+
+func TestHub_WithDroppedCounter(t *testing.T) {
+	counter := &mockDroppedCounter{}
+	hub := NewHub(WithBufferSize(5), WithDroppedCounter(counter))
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	// Fill buffer and cause drops
+	for i := 0; i < 10; i++ {
+		hub.Broadcast([]byte("message"))
+	}
+
+	// Drain channel
+	for {
+		select {
+		case <-ch:
+		default:
+			goto done
+		}
+	}
+done:
+
+	// Verify counter was called
+	if counter.Count() != 5 {
+		t.Errorf("expected counter to record 5 drops, got %d", counter.Count())
+	}
+}
+
+func TestHub_SetDroppedCounter(t *testing.T) {
+	hub := NewHub(WithBufferSize(5))
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	// Cause some drops without counter
+	for i := 0; i < 7; i++ {
+		hub.Broadcast([]byte("message"))
+	}
+
+	// Drain
+	for {
+		select {
+		case <-ch:
+		default:
+			goto done
+		}
+	}
+done:
+
+	// Now set counter and cause more drops
+	counter := &mockDroppedCounter{}
+	hub.SetDroppedCounter(counter)
+
+	for i := 0; i < 7; i++ {
+		hub.Broadcast([]byte("message"))
+	}
+
+	// Drain again
+	for {
+		select {
+		case <-ch:
+		default:
+			goto done2
+		}
+	}
+done2:
+
+	// Counter should only have drops after it was set
+	if counter.Count() != 2 {
+		t.Errorf("expected counter to record 2 drops, got %d", counter.Count())
+	}
+
+	// But total should include all drops
+	if hub.DroppedTotal() != 4 {
+		t.Errorf("expected 4 total dropped, got %d", hub.DroppedTotal())
 	}
 }

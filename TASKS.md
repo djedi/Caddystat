@@ -64,17 +64,17 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### Data Export
 
-- [ ] Add CSV export endpoint (`GET /api/export/csv?range=24h`)
-- [ ] Add JSON export endpoint (`GET /api/export/json?range=24h`)
-- [ ] Add database backup endpoint or CLI command
-- [ ] Document backup/restore procedures in README
+- [x] Add CSV export endpoint (`GET /api/export/csv?range=24h`)
+- [x] Add JSON export endpoint (`GET /api/export/json?range=24h`)
+- [x] Add database backup endpoint or CLI command
+- [x] Document backup/restore procedures in README
 
 ### Error Handling
 
-- [ ] Return proper HTTP error codes with JSON error bodies
-- [ ] Add error tracking for failed imports (count per file, last error)
-- [ ] Surface parsing errors in admin/status endpoint
-- [ ] Add retry logic for transient failures (DB locks, file reads)
+- [x] Return proper HTTP error codes with JSON error bodies
+- [x] Add error tracking for failed imports (count per file, last error)
+- [x] Surface parsing errors in admin/status endpoint
+- [x] Add retry logic for transient failures (DB locks, file reads)
 
 ---
 
@@ -82,24 +82,24 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### Enhanced Analytics
 
-- [ ] Add page load time tracking (from Caddy's `duration` field)
-- [ ] Add bandwidth tracking per host/path
-- [ ] Add visitor session reconstruction (group requests by IP + UA + time)
-- [ ] Add entry/exit page tracking
-- [ ] Add bounce rate calculation
-- [ ] Add configurable visit timeout (currently hardcoded at 30 minutes)
+- [x] Add page load time tracking (from Caddy's `duration` field)
+- [x] Add bandwidth tracking per host/path
+- [x] Add visitor session reconstruction (group requests by IP + UA + time)
+- [x] Add entry/exit page tracking
+- [x] Add bounce rate calculation
+- [x] Add configurable visit timeout (`timeout` query parameter, default 30 minutes)
 
 ### Improved Bot Detection
 
-- [ ] Move bot signatures to external config file (easier updates)
-- [ ] Add bot intent classification (SEO crawler, spam, monitoring, AI)
-- [ ] Add case-insensitive bot matching
-- [ ] Add community-contributed bot list support
-- [ ] Track bot-specific metrics separately (requests, bandwidth)
+- [x] Move bot signatures to external config file (easier updates)
+- [x] Add bot intent classification (SEO crawler, spam, monitoring, AI)
+- [x] Add case-insensitive bot matching
+- [x] Add community-contributed bot list support
+- [x] Track bot-specific metrics separately (requests, bandwidth)
 
 ### Multi-Site Management
 
-- [ ] Add site management API (`GET/POST /api/sites`)
+- [x] Add site management API (`GET/POST /api/sites`)
 - [ ] Add per-site retention policies
 - [ ] Add cross-site aggregate view
 - [ ] Add site-specific authentication/permissions
@@ -125,8 +125,8 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### UI/UX Enhancements
 
-- [ ] Add loading indicators for API calls
-- [ ] Add error messages when API calls fail
+- [x] Add loading indicators for API calls
+- [x] Add error messages when API calls fail
 - [ ] Add pagination for large tables (visitors, paths, referrers)
 - [ ] Make "top N" limits configurable in UI (top 5 → top 10/25/50)
 - [ ] Add date range picker for archive view
@@ -233,13 +233,13 @@ These are small improvements that provide immediate value:
 Known issues to address:
 
 - [x] Sessions lost on container restart (implement persistent sessions)
-- [ ] Import progress only saved every 10,000 rows (reduce to 1,000)
-- [ ] `ListenAddr` default mismatch between config (`:8404`) and docs (`:8000`)
-- [ ] Timezone handling: ensure frontend displays times correctly
-- [ ] SSE broadcasts can be dropped silently under high load
-- [ ] No error shown in UI when API requests fail
-- [ ] MacOS version detection is basic/incomplete
-- [ ] Kindle/Playbook device detection may be incomplete
+- [x] Import progress only saved every 10,000 rows (reduce to 1,000)
+- [x] `ListenAddr` default mismatch between config (`:8404`) and docs (`:8000`)
+- [x] Timezone handling: ensure frontend displays times correctly
+- [x] SSE broadcasts can be dropped silently under high load
+- [x] No error shown in UI when API requests fail
+- [x] MacOS version detection is basic/incomplete
+- [x] Kindle/Playbook device detection may be incomplete
 
 ---
 
@@ -247,7 +247,7 @@ Known issues to address:
 
 Items that should be addressed for long-term maintainability:
 
-- [ ] Refactor large `storage.go` (1277 lines) into smaller files
+- [x] Refactor large `storage.go` (1277 lines) into smaller files
 - [ ] Extract query building logic into separate functions
 - [ ] Add interfaces for storage layer (enables testing with mocks)
 - [ ] Add interfaces for SSE hub (enables testing)
@@ -263,14 +263,14 @@ Items that should be addressed for long-term maintainability:
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
 | Security & Stability     | 21      | 21        | 100%       |
-| Performance & Operations | 16      | 13        | 81%        |
-| New Features             | 20      | 0         | 0%         |
-| Frontend                 | 18      | 0         | 0%         |
+| Performance & Operations | 21      | 21        | 100%       |
+| New Features             | 24      | 12        | 50%        |
+| Frontend                 | 18      | 2         | 11%        |
 | Nice-to-Have             | 21      | 0         | 0%         |
 | Quick Wins               | 10      | 10        | 100%       |
-| Bug Fixes                | 8       | 1         | 13%        |
-| Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **122** | **45**    | **37%**    |
+| Bug Fixes                | 8       | 8         | 100%       |
+| Technical Debt           | 8       | 1         | 13%        |
+| **Total**                | **131** | **75**    | **57%**    |
 
 ---
 

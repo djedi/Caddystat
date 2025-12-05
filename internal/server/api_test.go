@@ -875,7 +875,7 @@ func TestParseRange(t *testing.T) {
 		{"24h", time.Hour, 24 * time.Hour},
 		{"168h", time.Hour, 168 * time.Hour}, // Go duration format for 7 days
 		{"30m", time.Hour, 30 * time.Minute},
-		{"7d", 12 * time.Hour, 12 * time.Hour},  // "7d" is not valid Go duration, returns default
+		{"7d", 12 * time.Hour, 12 * time.Hour}, // "7d" is not valid Go duration, returns default
 		{"invalid", 12 * time.Hour, 12 * time.Hour},
 	}
 

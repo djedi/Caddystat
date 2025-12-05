@@ -67,17 +67,56 @@ Both `AUTH_USERNAME` and `AUTH_PASSWORD` must be set to enable authentication.
 
 ### Security
 
-| Variable                 | Default   | Description                                     |
-| ------------------------ | --------- | ----------------------------------------------- |
-| `RATE_LIMIT_PER_MINUTE`  | `0`       | Max requests per minute per IP (0 = disabled)   |
-| `MAX_REQUEST_BODY_BYTES` | `1048576` | Maximum request body size in bytes (1MB default)|
+| Variable                 | Default   | Description                                      |
+| ------------------------ | --------- | ------------------------------------------------ |
+| `RATE_LIMIT_PER_MINUTE`  | `0`       | Max requests per minute per IP (0 = disabled)    |
+| `MAX_REQUEST_BODY_BYTES` | `1048576` | Maximum request body size in bytes (1MB default) |
 
 ### Database
 
-| Variable             | Default | Description                                        |
-| -------------------- | ------- | -------------------------------------------------- |
-| `DB_MAX_CONNECTIONS` | `1`     | Maximum database connections (increase for reads)  |
-| `DB_QUERY_TIMEOUT`   | `30s`   | Query timeout duration (e.g., `30s`, `1m`, `2m30s`)|
+| Variable             | Default | Description                                         |
+| -------------------- | ------- | --------------------------------------------------- |
+| `DB_MAX_CONNECTIONS` | `1`     | Maximum database connections (increase for reads)   |
+| `DB_QUERY_TIMEOUT`   | `30s`   | Query timeout duration (e.g., `30s`, `1m`, `2m30s`) |
+
+### Bot Detection
+
+| Variable              | Default   | Description                                                  |
+| --------------------- | --------- | ------------------------------------------------------------ |
+| `BOT_SIGNATURES_PATH` | _(empty)_ | Comma-separated list of bot signature JSON files (see below) |
+
+Caddystat includes built-in bot detection with intent classification (SEO, social, monitoring, AI, archiver). To customize bot detection, create JSON files with the following format:
+
+```json
+{
+  "version": "1.0",
+  "bots": [
+    { "signature": "mybot", "name": "MyBot", "intent": "seo" },
+    { "signature": "customcrawler", "name": "CustomCrawler", "intent": "monitoring" }
+  ]
+}
+```
+
+Valid intent values: `seo`, `social`, `monitoring`, `ai`, `archiver`, `unknown`
+
+See `bots.json` in the repository root for a complete example.
+
+**Community Bot Lists:** You can load multiple bot signature files by providing a comma-separated list. Signatures from later files override earlier ones, and all signatures are merged with the built-in defaults.
+
+```bash
+# Load built-in defaults + your custom bots
+BOT_SIGNATURES_PATH=/config/my-bots.json
+
+# Load multiple community lists (later files override earlier ones)
+BOT_SIGNATURES_PATH=/config/ai-bots.json,/config/seo-bots.json,/config/my-overrides.json
+```
+
+This allows you to:
+
+- Use community-maintained bot lists (e.g., from GitHub)
+- Override default bot classifications
+- Add organization-specific bot signatures
+- Keep bot lists organized by category
 
 ### Advanced
 
@@ -105,7 +144,7 @@ Use the `dev` script to manage the development environment:
 
 Run `./dev --help` for full usage information.
 
-Includes a sample `Caddyfile` that logs to `/var/log/caddy/access.log`. Logs are shared with the `caddystat` container via a volume. Web UI is on `http://localhost:8000/`.
+Includes a sample `Caddyfile` that logs to `/var/log/caddy/access.log`. Logs are shared with the `caddystat` container via a volume. Web UI is on `http://localhost:8404/`.
 
 ## Production Setup
 
@@ -233,9 +272,86 @@ The Go server serves `web/_site` at `/`.
 - `GET /api/stats/summary?range=24h` – totals, statuses, bandwidth, top paths/hosts, unique visitors, avg latency.
 - `GET /api/stats/requests?range=24h` – hourly buckets.
 - `GET /api/stats/geo?range=24h` – country/region/city counts (empty if GeoLite not configured).
+- `GET /api/stats/bandwidth?range=24h&limit=10` – bandwidth statistics per host, path, and content type.
 - `GET /api/sse` – server-sent events with live summary snapshots.
 - `GET /metrics` – Prometheus metrics endpoint.
 - `GET /health` – health check endpoint (returns DB status and version).
+
+## Data Export & Backup
+
+Caddystat provides several endpoints for exporting data and backing up the database.
+
+### Export Endpoints
+
+All export endpoints require authentication if `AUTH_USERNAME` and `AUTH_PASSWORD` are configured.
+
+| Endpoint                 | Description                   | Query Parameters               |
+| ------------------------ | ----------------------------- | ------------------------------ |
+| `GET /api/export/csv`    | Export requests as CSV        | `range` (default: 24h), `host` |
+| `GET /api/export/json`   | Export requests as JSON array | `range` (default: 24h), `host` |
+| `GET /api/export/backup` | Download SQLite database file | None                           |
+
+**Examples:**
+
+```bash
+# Export last 24 hours as CSV
+curl -o export.csv http://localhost:8404/api/export/csv
+
+# Export last 7 days for a specific host
+curl -o export.csv "http://localhost:8404/api/export/csv?range=168h&host=example.com"
+
+# Export as JSON
+curl -o export.json http://localhost:8404/api/export/json?range=48h
+
+# Download full database backup
+curl -o backup.db http://localhost:8404/api/export/backup
+```
+
+### Backup Procedures
+
+**Manual Backup:**
+
+1. Download the database via the API:
+
+   ```bash
+   curl -o caddystat-backup-$(date +%Y%m%d).db http://localhost:8404/api/export/backup
+   ```
+
+2. Or copy the database file directly (stop the service first to ensure consistency):
+   ```bash
+   docker compose stop caddystat
+   cp /path/to/caddystat.db /backup/caddystat-$(date +%Y%m%d).db
+   docker compose start caddystat
+   ```
+
+**Automated Backup (cron):**
+
+Add to your crontab for daily backups:
+
+```bash
+0 2 * * * curl -s -o /backups/caddystat-$(date +\%Y\%m\%d).db http://localhost:8404/api/export/backup
+```
+
+### Restore Procedures
+
+1. Stop the Caddystat service:
+
+   ```bash
+   docker compose stop caddystat
+   ```
+
+2. Replace the database file:
+
+   ```bash
+   cp /backup/caddystat-backup.db /path/to/caddystat.db
+   ```
+
+3. Start the service:
+   ```bash
+   docker compose start caddystat
+   ```
+
+**Note:** The backup endpoint streams the live database file. For guaranteed consistency during high-traffic periods, prefer stopping the service or using the file copy method.
 
 ## Development
 

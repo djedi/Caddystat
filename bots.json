@@ -1,0 +1,286 @@
+{
+  "version": "1.0",
+  "description": "Bot signatures for Caddystat. Signatures are matched case-insensitively against User-Agent strings.",
+  "bots": [
+    {
+      "signature": "googlebot",
+      "name": "Googlebot",
+      "intent": "seo"
+    },
+    {
+      "signature": "bingbot",
+      "name": "Bingbot",
+      "intent": "seo"
+    },
+    {
+      "signature": "yandexbot",
+      "name": "YandexBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "duckduckbot",
+      "name": "DuckDuckBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "baiduspider",
+      "name": "Baiduspider",
+      "intent": "seo"
+    },
+    {
+      "signature": "facebookexternalhit",
+      "name": "Facebook",
+      "intent": "social"
+    },
+    {
+      "signature": "facebot",
+      "name": "Facebook",
+      "intent": "social"
+    },
+    {
+      "signature": "twitterbot",
+      "name": "Twitterbot",
+      "intent": "social"
+    },
+    {
+      "signature": "linkedinbot",
+      "name": "LinkedInBot",
+      "intent": "social"
+    },
+    {
+      "signature": "slurp",
+      "name": "Yahoo Slurp",
+      "intent": "seo"
+    },
+    {
+      "signature": "msnbot",
+      "name": "MSNBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "ahrefsbot",
+      "name": "AhrefsBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "semrushbot",
+      "name": "SemrushBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "dotbot",
+      "name": "DotBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "mj12bot",
+      "name": "MJ12Bot",
+      "intent": "seo"
+    },
+    {
+      "signature": "petalbot",
+      "name": "PetalBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "sogou",
+      "name": "Sogou",
+      "intent": "seo"
+    },
+    {
+      "signature": "exabot",
+      "name": "Exabot",
+      "intent": "seo"
+    },
+    {
+      "signature": "ia_archiver",
+      "name": "Alexa",
+      "intent": "seo"
+    },
+    {
+      "signature": "archive.org_bot",
+      "name": "Internet Archive",
+      "intent": "archiver"
+    },
+    {
+      "signature": "applebot",
+      "name": "Applebot",
+      "intent": "seo"
+    },
+    {
+      "signature": "gptbot",
+      "name": "GPTBot",
+      "intent": "ai"
+    },
+    {
+      "signature": "claudebot",
+      "name": "ClaudeBot",
+      "intent": "ai"
+    },
+    {
+      "signature": "anthropic",
+      "name": "Anthropic",
+      "intent": "ai"
+    },
+    {
+      "signature": "chatgpt",
+      "name": "ChatGPT",
+      "intent": "ai"
+    },
+    {
+      "signature": "bytespider",
+      "name": "ByteSpider",
+      "intent": "ai"
+    },
+    {
+      "signature": "ccbot",
+      "name": "CCBot",
+      "intent": "ai"
+    },
+    {
+      "signature": "cohere-ai",
+      "name": "Cohere",
+      "intent": "ai"
+    },
+    {
+      "signature": "perplexitybot",
+      "name": "PerplexityBot",
+      "intent": "ai"
+    },
+    {
+      "signature": "youbot",
+      "name": "YouBot",
+      "intent": "ai"
+    },
+    {
+      "signature": "uptimerobot",
+      "name": "UptimeRobot",
+      "intent": "monitoring"
+    },
+    {
+      "signature": "pingdom",
+      "name": "Pingdom",
+      "intent": "monitoring"
+    },
+    {
+      "signature": "statuscake",
+      "name": "StatusCake",
+      "intent": "monitoring"
+    },
+    {
+      "signature": "jetmon",
+      "name": "Jetmon",
+      "intent": "monitoring"
+    },
+    {
+      "signature": "site24x7",
+      "name": "Site24x7",
+      "intent": "monitoring"
+    },
+    {
+      "signature": "newrelicpinger",
+      "name": "New Relic",
+      "intent": "monitoring"
+    },
+    {
+      "signature": "datadog",
+      "name": "Datadog",
+      "intent": "monitoring"
+    },
+    {
+      "signature": "nbot",
+      "name": "nbot",
+      "intent": "unknown"
+    },
+    {
+      "signature": "nutch",
+      "name": "Nutch",
+      "intent": "seo"
+    },
+    {
+      "signature": "ning",
+      "name": "Ning",
+      "intent": "unknown"
+    },
+    {
+      "signature": "seznambot",
+      "name": "SeznamBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "rogerbot",
+      "name": "RogerBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "blexbot",
+      "name": "BLEXBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "megaindex",
+      "name": "MegaIndex",
+      "intent": "seo"
+    },
+    {
+      "signature": "seokicks",
+      "name": "SEOkicks",
+      "intent": "seo"
+    },
+    {
+      "signature": "sistrix",
+      "name": "SISTRIX",
+      "intent": "seo"
+    },
+    {
+      "signature": "mojeekbot",
+      "name": "MojeekBot",
+      "intent": "seo"
+    },
+    {
+      "signature": "qwantify",
+      "name": "Qwant",
+      "intent": "seo"
+    },
+    {
+      "signature": "pinterestbot",
+      "name": "Pinterest",
+      "intent": "social"
+    },
+    {
+      "signature": "discordbot",
+      "name": "Discord",
+      "intent": "social"
+    },
+    {
+      "signature": "slackbot",
+      "name": "Slack",
+      "intent": "social"
+    },
+    {
+      "signature": "telegrambot",
+      "name": "Telegram",
+      "intent": "social"
+    },
+    {
+      "signature": "whatsapp",
+      "name": "WhatsApp",
+      "intent": "social"
+    },
+    {
+      "signature": "crawler",
+      "name": "Unknown Crawler",
+      "intent": "unknown"
+    },
+    {
+      "signature": "spider",
+      "name": "Unknown Spider",
+      "intent": "unknown"
+    },
+    {
+      "signature": "bot",
+      "name": "Unknown Bot",
+      "intent": "unknown"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -25,6 +26,15 @@ import (
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
 	"github.com/dustin/Caddystat/internal/useragent"
+)
+
+const (
+	// maxRetries is the maximum number of retry attempts for transient errors.
+	maxRetries = 3
+	// initialRetryDelay is the initial delay before retrying.
+	initialRetryDelay = 100 * time.Millisecond
+	// maxRetryDelay is the maximum delay between retries.
+	maxRetryDelay = 2 * time.Second
 )
 
 type Ingestor struct {
@@ -150,7 +160,13 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 		startOffset = progress.ByteOffset
 	}
 
-	f, err := os.Open(path)
+	// Open file with retry logic for transient failures
+	var f *os.File
+	err = retryWithBackoff(ctx, "open_log_file", func() error {
+		var openErr error
+		f, openErr = os.Open(path)
+		return openErr
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -182,6 +198,10 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 	scanner.Buffer(buf, 1024*1024)
 
 	count := 0
+	errorCount := 0
+	lineNum := int64(0)
+	var lastParseErr error
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -189,6 +209,7 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 		default:
 		}
 
+		lineNum++
 		line := scanner.Text()
 		lineLen := int64(len(line)) + 1 // +1 for newline
 		currentOffset += lineLen
@@ -199,14 +220,32 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 
 		// Use handleLineNoNotify to avoid spamming SSE during import
 		if err := i.handleLineNoNotify(ctx, line); err != nil {
-			// Skip malformed lines silently during import
+			errorCount++
+			lastParseErr = err
+
+			// Log error details periodically (not every line to avoid spam)
+			if errorCount <= 5 || errorCount%1000 == 0 {
+				// Show sample of the malformed line (truncated for safety)
+				sample := line
+				if len(sample) > 100 {
+					sample = sample[:100] + "..."
+				}
+				slog.Debug("failed to parse log line",
+					"file", filepath.Base(path),
+					"line_num", lineNum,
+					"error", err,
+					"sample", sample)
+			}
+
+			// Record error to database
+			_ = i.store.RecordImportError(ctx, path, err)
 			continue
 		}
 		count++
 
-		// Log progress and save checkpoint every 10000 entries
-		if count%10000 == 0 {
-			slog.Debug("import progress", "file", filepath.Base(path), "entries", count)
+		// Log progress and save checkpoint every 1000 entries (reduced from 10000 for more frequent saves)
+		if count%1000 == 0 {
+			slog.Debug("import progress", "file", filepath.Base(path), "entries", count, "errors", errorCount)
 			// Save progress periodically
 			_ = i.store.SetImportProgress(ctx, storage.ImportProgress{
 				FilePath:   path,
@@ -221,6 +260,15 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 		return count, err
 	}
 
+	// Log final stats including errors
+	if errorCount > 0 {
+		slog.Warn("import completed with parse errors",
+			"file", path,
+			"imported", count,
+			"errors", errorCount,
+			"last_error", lastParseErr)
+	}
+
 	// Save final progress - for gzipped files, use fileSize as offset to mark complete
 	finalOffset := currentOffset
 	if isGzipped {
@@ -233,6 +281,11 @@ func (i *Ingestor) importLogFile(ctx context.Context, path string) (int, error) 
 		FileMtime:  fileMtime,
 	}); err != nil {
 		slog.Warn("failed to save import progress", "path", path, "error", err)
+	}
+
+	// Clear errors if import completed successfully with no errors
+	if errorCount == 0 {
+		_ = i.store.ClearImportErrors(ctx, path)
 	}
 
 	return count, nil
@@ -280,8 +333,13 @@ func (i *Ingestor) handleLineNoNotify(ctx context.Context, line string) error {
 		DeviceType:     ua.DeviceType,
 		IsBot:          ua.IsBot,
 		BotName:        ua.BotName,
+		BotIntent:      string(ua.BotIntent),
 	}
-	return i.store.InsertRequest(ctx, record)
+
+	// Use retry logic for database inserts
+	return retryWithBackoff(ctx, "insert_request", func() error {
+		return i.store.InsertRequest(ctx, record)
+	})
 }
 
 func (i *Ingestor) tailFile(ctx context.Context, path string) {
@@ -359,8 +417,13 @@ func (i *Ingestor) handleLine(ctx context.Context, line string) error {
 		DeviceType:     ua.DeviceType,
 		IsBot:          ua.IsBot,
 		BotName:        ua.BotName,
+		BotIntent:      string(ua.BotIntent),
 	}
-	if err := i.store.InsertRequest(ctx, record); err != nil {
+
+	// Use retry logic for database inserts
+	if err := retryWithBackoff(ctx, "insert_request", func() error {
+		return i.store.InsertRequest(ctx, record)
+	}); err != nil {
 		return err
 	}
 
@@ -369,6 +432,10 @@ func (i *Ingestor) handleLine(ctx context.Context, line string) error {
 		i.metrics.RecordIngest(time.Since(start).Seconds(), record.Bytes)
 		if !record.Timestamp.IsZero() {
 			i.metrics.SetLastIngestTimestamp(float64(record.Timestamp.Unix()))
+		}
+		// Record bot metrics separately
+		if record.IsBot {
+			i.metrics.RecordBotIngest(record.BotIntent, record.Bytes)
 		}
 	}
 
@@ -533,8 +600,8 @@ func (g *GeoLookup) CacheStats() *GeoCacheStats {
 }
 
 type caddyLogEntry struct {
-	Timestamp   json.RawMessage `json:"ts"` // Can be float64 or string (RFC3339)
-	Request     struct {
+	Timestamp json.RawMessage `json:"ts"` // Can be float64 or string (RFC3339)
+	Request   struct {
 		Host       string              `json:"host"`
 		URI        string              `json:"uri"`
 		RemoteIP   string              `json:"remote_ip"`
@@ -687,4 +754,69 @@ func hashIP(ip, salt string) string {
 	}
 	sum := sha256.Sum256([]byte(salt + ip))
 	return hex.EncodeToString(sum[:])
+}
+
+// isTransientError checks if an error is transient and can be retried.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// SQLite busy/locked errors
+	if strings.Contains(errStr, "database is locked") ||
+		strings.Contains(errStr, "database table is locked") ||
+		strings.Contains(errStr, "SQLITE_BUSY") ||
+		strings.Contains(errStr, "SQLITE_LOCKED") {
+		return true
+	}
+	// File system transient errors
+	if errors.Is(err, os.ErrNotExist) {
+		return false // Not transient
+	}
+	if strings.Contains(errStr, "resource temporarily unavailable") ||
+		strings.Contains(errStr, "too many open files") {
+		return true
+	}
+	return false
+}
+
+// retryWithBackoff retries a function with exponential backoff for transient errors.
+func retryWithBackoff(ctx context.Context, operation string, fn func() error) error {
+	var lastErr error
+	delay := initialRetryDelay
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		if !isTransientError(err) {
+			return err
+		}
+
+		lastErr = err
+		if attempt < maxRetries {
+			slog.Debug("retrying after transient error",
+				"operation", operation,
+				"attempt", attempt+1,
+				"max_attempts", maxRetries+1,
+				"delay", delay,
+				"error", err)
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+
+			// Exponential backoff with cap
+			delay *= 2
+			if delay > maxRetryDelay {
+				delay = maxRetryDelay
+			}
+		}
+	}
+
+	return lastErr
 }

@@ -116,6 +116,35 @@
         </div>
       </header>
 
+      <!-- Error Banner -->
+      <div x-show="apiError" x-cloak class="error-banner" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 transform -translate-y-2" x-transition:enter-end="opacity-100 transform translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+        <div class="error-banner-content">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="error-icon">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span x-text="apiError"></span>
+          <button @click="dismissError()" class="error-dismiss" title="Dismiss">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Loading Indicator -->
+      <div x-show="loading" x-cloak class="loading-overlay" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+        <div class="loading-spinner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+            <path d="M12 2a10 10 0 0 1 10 10" class="spinner-arc"/>
+          </svg>
+          <span x-text="initialLoad ? 'Loading dashboard...' : 'Refreshing...'"></span>
+        </div>
+      </div>
+
       <!-- Controls -->
       <div class="control-dock">
         <div class="segmented">
@@ -252,7 +281,7 @@
               <template x-for="d in dailyHistory.days" :key="d.date">
                 <div class="bar-col narrow">
                   <div class="bar-fill alt" :style="`height:${barHeightDaily(d.hits)}`" :title="`${formatNumber(d.hits)} hits`"></div>
-                  <div class="bar-label" x-text="new Date(d.date).getDate().toString().padStart(2,'0')"></div>
+                  <div class="bar-label" x-text="new Date(d.date).getUTCDate().toString().padStart(2,'0')"></div>
                 </div>
               </template>
             </div>
@@ -931,6 +960,51 @@
           activeView: 'live',
           lastUpdated: null,
           eventSource: null,
+          apiError: null,
+          apiErrorTimeout: null,
+          loading: false,
+          initialLoad: true,
+
+          showError(message) {
+            this.apiError = message;
+            if (this.apiErrorTimeout) {
+              clearTimeout(this.apiErrorTimeout);
+            }
+            this.apiErrorTimeout = setTimeout(() => {
+              this.apiError = null;
+            }, 8000);
+          },
+
+          dismissError() {
+            this.apiError = null;
+            if (this.apiErrorTimeout) {
+              clearTimeout(this.apiErrorTimeout);
+              this.apiErrorTimeout = null;
+            }
+          },
+
+          async fetchApi(url, errorContext) {
+            try {
+              const res = await fetch(url);
+              if (!res.ok) {
+                let errorMsg = `${errorContext}: Server returned ${res.status}`;
+                try {
+                  const data = await res.json();
+                  if (data.error) {
+                    errorMsg = `${errorContext}: ${data.error}`;
+                  }
+                } catch (e) {
+                  // Response wasn't JSON, use status code message
+                }
+                this.showError(errorMsg);
+                return null;
+              }
+              return await res.json();
+            } catch (err) {
+              this.showError(`${errorContext}: ${err.message || 'Network error'}`);
+              return null;
+            }
+          },
 
           async init() {
             const savedView = localStorage.getItem('caddystatViewMode');
@@ -950,20 +1024,25 @@
           },
 
           async loadHosts() {
-            const res = await fetch(`/api/stats/summary?range=${this.currentRangeValue()}`);
-            if (res.ok) {
-              const data = await res.json();
+            const data = await this.fetchApi(`/api/stats/summary?range=${this.currentRangeValue()}`, 'Failed to load hosts');
+            if (data) {
               this.allHosts = data.hosts || [];
             }
           },
 
           async refresh() {
-            if (this.activeView === 'live') {
-              await this.refreshLive();
-              this.connect();
-            } else {
-              await this.refreshArchive();
-              this.disconnect();
+            this.loading = true;
+            try {
+              if (this.activeView === 'live') {
+                await this.refreshLive();
+                this.connect();
+              } else {
+                await this.refreshArchive();
+                this.disconnect();
+              }
+            } finally {
+              this.loading = false;
+              this.initialLoad = false;
             }
           },
 
@@ -1029,87 +1108,84 @@
           },
 
           async loadMonthlyHistory() {
-            const res = await fetch(`/api/stats/monthly?months=12${this.selectedHost ? `&host=${encodeURIComponent(this.selectedHost)}` : ''}`);
-            if (res.ok) {
-              const data = await res.json();
+            const data = await this.fetchApi(`/api/stats/monthly?months=12${this.selectedHost ? `&host=${encodeURIComponent(this.selectedHost)}` : ''}`, 'Failed to load monthly history');
+            if (data) {
               this.monthlyHistory = data;
               this.monthlyMaxHits = Math.max(...(data.months || []).map(m => m.hits || 0), 0) || 1;
             }
           },
 
           async loadDailyHistory() {
-            const res = await fetch(`/api/stats/daily${this.selectedHost ? `?host=${encodeURIComponent(this.selectedHost)}` : ''}`);
-            if (res.ok) {
-              const data = await res.json();
+            const data = await this.fetchApi(`/api/stats/daily${this.selectedHost ? `?host=${encodeURIComponent(this.selectedHost)}` : ''}`, 'Failed to load daily history');
+            if (data) {
               this.dailyHistory = data;
               this.dailyMaxHits = Math.max(...(data.days || []).map(d => d.hits || 0), 0) || 1;
             }
           },
 
           async loadSummary() {
-            const res = await fetch(`/api/stats/summary?${this.queryParams()}`);
-            if (res.ok) {
-              this.summary = await res.json();
+            const data = await this.fetchApi(`/api/stats/summary?${this.queryParams()}`, 'Failed to load summary');
+            if (data) {
+              this.summary = data;
               this.lastUpdated = new Date();
             }
           },
 
           async loadRequests() {
-            const res = await fetch(`/api/stats/requests?${this.queryParams()}`);
-            if (res.ok) {
-              const data = await res.json();
+            const data = await this.fetchApi(`/api/stats/requests?${this.queryParams()}`, 'Failed to load requests');
+            if (data) {
               this.requests = Array.isArray(data) ? data : [];
             }
           },
 
           async loadGeo() {
-            const res = await fetch(`/api/stats/geo?${this.queryParams()}`);
-            if (res.ok) {
-              this.geo = await res.json();
+            const data = await this.fetchApi(`/api/stats/geo?${this.queryParams()}`, 'Failed to load geo data');
+            if (data) {
+              this.geo = data;
             }
           },
 
           async loadVisitors() {
-            const res = await fetch(`/api/stats/hosts?${this.queryParams()}&limit=10`);
-            if (res.ok) {
-              this.visitors = await res.json() || [];
+            const data = await this.fetchApi(`/api/stats/hosts?${this.queryParams()}&limit=10`, 'Failed to load visitors');
+            if (data) {
+              this.visitors = data || [];
             }
           },
 
           async loadBrowsers() {
-            const res = await fetch(`/api/stats/browsers?${this.queryParams()}`);
-            if (res.ok) {
-              this.browsers = await res.json() || [];
+            const data = await this.fetchApi(`/api/stats/browsers?${this.queryParams()}`, 'Failed to load browser stats');
+            if (data) {
+              this.browsers = data || [];
             }
           },
 
           async loadOS() {
-            const res = await fetch(`/api/stats/os?${this.queryParams()}`);
-            if (res.ok) {
-              this.operatingSystems = await res.json() || [];
+            const data = await this.fetchApi(`/api/stats/os?${this.queryParams()}`, 'Failed to load OS stats');
+            if (data) {
+              this.operatingSystems = data || [];
             }
           },
 
           async loadRobots() {
-            const res = await fetch(`/api/stats/robots?${this.queryParams()}`);
-            if (res.ok) {
-              this.robots = await res.json() || [];
+            const data = await this.fetchApi(`/api/stats/robots?${this.queryParams()}`, 'Failed to load robot stats');
+            if (data) {
+              this.robots = data || [];
             }
           },
 
           async loadReferrers() {
-            const res = await fetch(`/api/stats/referrers?${this.queryParams()}`);
-            if (res.ok) {
-              this.referrers = await res.json() || [];
+            const data = await this.fetchApi(`/api/stats/referrers?${this.queryParams()}`, 'Failed to load referrer stats');
+            if (data) {
+              this.referrers = data || [];
             }
           },
 
           async loadRecentRequests() {
             const params = new URLSearchParams({ limit: '20' });
             if (this.selectedHost) params.set('host', this.selectedHost);
-            const res = await fetch(`/api/stats/recent?${params.toString()}`);
-            if (res.ok) {
-              this.recentRequests = await res.json() || [];
+            const data = await this.fetchApi(`/api/stats/recent?${params.toString()}`, 'Failed to load recent requests');
+            if (data) {
+              this.recentRequests = data || [];
             }
           },
 
@@ -1216,13 +1292,15 @@
           formatMonth(dateStr) {
             if (!dateStr) return "-";
             const dt = new Date(dateStr);
-            return dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+            // Use UTC timezone for calendar period display to avoid date shifting
+            return dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit', timeZone: 'UTC' });
           },
 
           formatDay(dateStr) {
             if (!dateStr) return "-";
             const dt = new Date(dateStr);
-            return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+            // Use UTC timezone for calendar period display to avoid date shifting
+            return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
           },
 
           formatTime(date) {

@@ -19,6 +19,7 @@ import (
 	"github.com/dustin/Caddystat/internal/server"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
+	"github.com/dustin/Caddystat/internal/useragent"
 	"github.com/dustin/Caddystat/internal/version"
 )
 
@@ -52,6 +53,13 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Load bot signatures if configured (supports multiple files for community lists)
+	if len(cfg.BotSignaturesPaths) > 0 {
+		if err := useragent.LoadBotSignaturesList(cfg.BotSignaturesPaths); err != nil {
+			slog.Warn("failed to load bot signatures, using defaults", "paths", cfg.BotSignaturesPaths, "error", err)
+		}
+	}
+
 	// Print startup banner
 	printStartupBanner(cfg)
 
@@ -75,7 +83,7 @@ func main() {
 		slog.Debug("geo lookups disabled", "reason", "MAXMIND_DB_PATH not set")
 	}
 
-	hub := sse.NewHub()
+	hub := sse.NewHub(sse.WithBufferSize(cfg.SSEBufferSize))
 
 	// Initialize Prometheus metrics
 	m := metrics.New(
@@ -125,6 +133,9 @@ func main() {
 	if err := m.Register(); err != nil {
 		slog.Warn("failed to register Prometheus metrics", "error", err)
 	}
+
+	// Wire up SSE dropped message counter after metrics creation
+	hub.SetDroppedCounter(m)
 
 	ingestor := ingest.New(cfg, store, hub, geo, m)
 
@@ -257,6 +268,9 @@ func printStartupBanner(cfg config.Config) {
 	}
 	if cfg.DBQueryTimeout != 30*time.Second {
 		fmt.Printf("  Query Timeout:  %s\n", cfg.DBQueryTimeout)
+	}
+	if len(cfg.BotSignaturesPaths) > 0 {
+		fmt.Printf("  Bot Signatures: %s\n", strings.Join(cfg.BotSignaturesPaths, ", "))
 	}
 	fmt.Println()
 }

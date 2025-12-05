@@ -1286,3 +1286,153 @@ body,
   width: 18px;
   height: 18px;
 }
+
+/* ============================================
+   ERROR BANNER
+   ============================================ */
+
+.error-banner {
+  margin-bottom: var(--space-md);
+}
+
+.error-banner-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--accent-danger);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.error-banner-content .error-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.error-banner-content span {
+  flex: 1;
+}
+
+.error-dismiss {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--accent-danger);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  opacity: 0.7;
+}
+
+.error-dismiss:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.error-dismiss svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Transition utilities for Alpine.js */
+.transition {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ease-out {
+  transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+.ease-in {
+  transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+.duration-200 {
+  transition-duration: 200ms;
+}
+
+.duration-150 {
+  transition-duration: 150ms;
+}
+
+.opacity-0 {
+  opacity: 0;
+}
+
+.opacity-100 {
+  opacity: 1;
+}
+
+.transform {
+  transform: translateX(var(--tw-translate-x, 0)) translateY(var(--tw-translate-y, 0));
+}
+
+.-translate-y-2 {
+  --tw-translate-y: -0.5rem;
+}
+
+.translate-y-0 {
+  --tw-translate-y: 0;
+}
+
+/* ============================================
+   LOADING INDICATOR
+   ============================================ */
+
+.loading-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl) var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.loading-spinner svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent-primary);
+}
+
+.loading-spinner .spinner-arc {
+  animation: spin 1s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-spinner span {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}

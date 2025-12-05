@@ -149,3 +149,680 @@ func TestMetricsEndpoint(t *testing.T) {
 		t.Error("expected non-empty metrics body")
 	}
 }
+
+func TestExportCSV(t *testing.T) {
+	srv, cleanup := setupTestServerWithData(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/export/csv?range=24h", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Check Content-Type
+	ct := w.Header().Get("Content-Type")
+	if ct != "text/csv" {
+		t.Errorf("expected Content-Type 'text/csv', got %q", ct)
+	}
+
+	// Check Content-Disposition (should be attachment with filename)
+	cd := w.Header().Get("Content-Disposition")
+	if !strings.HasPrefix(cd, "attachment; filename=caddystat-export-") {
+		t.Errorf("expected Content-Disposition to start with 'attachment; filename=caddystat-export-', got %q", cd)
+	}
+	if !strings.HasSuffix(cd, ".csv") {
+		t.Errorf("expected Content-Disposition to end with '.csv', got %q", cd)
+	}
+
+	// Check CSV content
+	body := w.Body.String()
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+
+	// Should have header + at least 3 data rows
+	if len(lines) < 4 {
+		t.Errorf("expected at least 4 lines (header + 3 records), got %d", len(lines))
+	}
+
+	// Check header row
+	expectedHeader := "id,timestamp,host,path,status,bytes,ip,referrer,user_agent,response_time_ms,country,region,city,browser,browser_version,os,os_version,device_type,is_bot,bot_name"
+	if lines[0] != expectedHeader {
+		t.Errorf("expected header %q, got %q", expectedHeader, lines[0])
+	}
+
+	// Check that data rows contain expected content
+	if !strings.Contains(body, "example.com") {
+		t.Error("expected CSV to contain 'example.com'")
+	}
+	if !strings.Contains(body, "/about") {
+		t.Error("expected CSV to contain '/about'")
+	}
+}
+
+func TestExportCSV_HostFilter(t *testing.T) {
+	srv, cleanup := setupTestServerWithData(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/export/csv?range=24h&host=nonexistent.com", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Should only have header line (no data for non-existent host)
+	body := w.Body.String()
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected 1 line (header only for non-existent host), got %d", len(lines))
+	}
+}
+
+func TestExportJSON(t *testing.T) {
+	srv, cleanup := setupTestServerWithData(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/export/json?range=24h", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Check Content-Type
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Check Content-Disposition (should be attachment with filename)
+	cd := w.Header().Get("Content-Disposition")
+	if !strings.HasPrefix(cd, "attachment; filename=caddystat-export-") {
+		t.Errorf("expected Content-Disposition to start with 'attachment; filename=caddystat-export-', got %q", cd)
+	}
+	if !strings.HasSuffix(cd, ".json") {
+		t.Errorf("expected Content-Disposition to end with '.json', got %q", cd)
+	}
+
+	// Check JSON content - should be valid JSON array
+	var data []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	// Should have at least 3 records
+	if len(data) < 3 {
+		t.Errorf("expected at least 3 records, got %d", len(data))
+	}
+
+	// Check that records contain expected fields
+	for _, record := range data {
+		if _, ok := record["id"]; !ok {
+			t.Error("expected record to have 'id' field")
+		}
+		if _, ok := record["timestamp"]; !ok {
+			t.Error("expected record to have 'timestamp' field")
+		}
+		if _, ok := record["host"]; !ok {
+			t.Error("expected record to have 'host' field")
+		}
+	}
+}
+
+func TestExportJSON_HostFilter(t *testing.T) {
+	srv, cleanup := setupTestServerWithData(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/export/json?range=24h&host=nonexistent.com", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Should be empty JSON array
+	var data []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if len(data) != 0 {
+		t.Errorf("expected 0 records for non-existent host, got %d", len(data))
+	}
+}
+
+func TestExportBackup(t *testing.T) {
+	srv, cleanup := setupTestServerWithData(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/export/backup", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Check Content-Type
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/x-sqlite3" {
+		t.Errorf("expected Content-Type 'application/x-sqlite3', got %q", ct)
+	}
+
+	// Check Content-Disposition (should be attachment with filename)
+	cd := w.Header().Get("Content-Disposition")
+	if !strings.HasPrefix(cd, "attachment; filename=caddystat-backup-") {
+		t.Errorf("expected Content-Disposition to start with 'attachment; filename=caddystat-backup-', got %q", cd)
+	}
+	if !strings.HasSuffix(cd, ".db") {
+		t.Errorf("expected Content-Disposition to end with '.db', got %q", cd)
+	}
+
+	// Check that we got some data (SQLite file should be non-empty)
+	if w.Body.Len() == 0 {
+		t.Error("expected non-empty backup body")
+	}
+
+	// SQLite files start with "SQLite format 3\000"
+	body := w.Body.Bytes()
+	if len(body) < 16 || string(body[:16]) != "SQLite format 3\x00" {
+		t.Error("expected response to be a valid SQLite database file")
+	}
+
+	// Check Content-Length header
+	cl := w.Header().Get("Content-Length")
+	if cl == "" {
+		t.Error("expected Content-Length header to be set")
+	}
+}
+
+func TestJSONErrorResponse_Unauthorized(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := storage.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+	defer store.Close()
+
+	hub := sse.NewHub()
+	cfg := config.Config{
+		ListenAddr:   ":8404",
+		DBPath:       dbPath,
+		AuthUsername: "admin",
+		AuthPassword: "secret",
+	}
+	srv := New(store, hub, cfg, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/summary", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d", http.StatusUnauthorized, w.Code)
+	}
+
+	// Check Content-Type is JSON
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Check JSON error structure
+	var errResp APIError
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Error != "unauthorized" {
+		t.Errorf("expected error 'unauthorized', got %q", errResp.Error)
+	}
+	if errResp.Code != "UNAUTHORIZED" {
+		t.Errorf("expected code 'UNAUTHORIZED', got %q", errResp.Code)
+	}
+}
+
+func TestJSONErrorResponse_MethodNotAllowed(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	// Try to login with GET instead of POST
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+
+	// Check Content-Type is JSON
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Check JSON error structure
+	var errResp APIError
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Error != "method not allowed" {
+		t.Errorf("expected error 'method not allowed', got %q", errResp.Error)
+	}
+	if errResp.Code != "METHOD_NOT_ALLOWED" {
+		t.Errorf("expected code 'METHOD_NOT_ALLOWED', got %q", errResp.Code)
+	}
+}
+
+func TestJSONErrorResponse_RateLimited(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := storage.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+	defer store.Close()
+
+	hub := sse.NewHub()
+	cfg := config.Config{
+		ListenAddr:         ":8404",
+		DBPath:             dbPath,
+		RateLimitPerMinute: 1, // Very low limit for testing
+	}
+	srv := New(store, hub, cfg, nil)
+
+	// First request should succeed
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("first request: expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Second request should be rate limited
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected status %d, got %d", http.StatusTooManyRequests, w.Code)
+	}
+
+	// Check Content-Type is JSON
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Check JSON error structure
+	var errResp APIError
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Error != "rate limit exceeded" {
+		t.Errorf("expected error 'rate limit exceeded', got %q", errResp.Error)
+	}
+	if errResp.Code != "RATE_LIMITED" {
+		t.Errorf("expected code 'RATE_LIMITED', got %q", errResp.Code)
+	}
+}
+
+func TestJSONErrorResponse_InvalidCredentials(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := storage.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+	defer store.Close()
+
+	hub := sse.NewHub()
+	cfg := config.Config{
+		ListenAddr:   ":8404",
+		DBPath:       dbPath,
+		AuthUsername: "admin",
+		AuthPassword: "secret",
+	}
+	srv := New(store, hub, cfg, nil)
+
+	// Set CSRF cookie first
+	initReq := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	csrfCookie := initW.Result().Cookies()[0]
+
+	// Try login with wrong credentials
+	body := strings.NewReader(`{"username": "admin", "password": "wrong"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(csrfCookie)
+	req.Header.Set("X-CSRF-Token", csrfCookie.Value)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d", http.StatusUnauthorized, w.Code)
+	}
+
+	// Check Content-Type is JSON
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Check JSON error structure
+	var errResp APIError
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Error != "invalid credentials" {
+		t.Errorf("expected error 'invalid credentials', got %q", errResp.Error)
+	}
+	if errResp.Code != "INVALID_CREDENTIALS" {
+		t.Errorf("expected code 'INVALID_CREDENTIALS', got %q", errResp.Code)
+	}
+}
+
+func TestJSONErrorResponse_CSRFMissing(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := storage.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+	defer store.Close()
+
+	hub := sse.NewHub()
+	cfg := config.Config{
+		ListenAddr:   ":8404",
+		DBPath:       dbPath,
+		AuthUsername: "admin",
+		AuthPassword: "secret",
+	}
+	srv := New(store, hub, cfg, nil)
+
+	// Try login without CSRF token
+	body := strings.NewReader(`{"username": "admin", "password": "secret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status %d, got %d", http.StatusForbidden, w.Code)
+	}
+
+	// Check Content-Type is JSON
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Check JSON error structure
+	var errResp APIError
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Error != "invalid or missing CSRF token" {
+		t.Errorf("expected error 'invalid or missing CSRF token', got %q", errResp.Error)
+	}
+	if errResp.Code != "CSRF_INVALID" {
+		t.Errorf("expected code 'CSRF_INVALID', got %q", errResp.Code)
+	}
+}
+
+func TestJSONErrorResponse_InvalidRequestBody(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := storage.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+	defer store.Close()
+
+	hub := sse.NewHub()
+	cfg := config.Config{
+		ListenAddr:   ":8404",
+		DBPath:       dbPath,
+		AuthUsername: "admin",
+		AuthPassword: "secret",
+	}
+	srv := New(store, hub, cfg, nil)
+
+	// Set CSRF cookie first
+	initReq := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	csrfCookie := initW.Result().Cookies()[0]
+
+	// Try login with invalid JSON
+	body := strings.NewReader(`{invalid json`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(csrfCookie)
+	req.Header.Set("X-CSRF-Token", csrfCookie.Value)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	// Check Content-Type is JSON
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// Check JSON error structure
+	var errResp APIError
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Error != "invalid request body" {
+		t.Errorf("expected error 'invalid request body', got %q", errResp.Error)
+	}
+	if errResp.Code != "INVALID_REQUEST" {
+		t.Errorf("expected code 'INVALID_REQUEST', got %q", errResp.Code)
+	}
+}
+
+func TestPerformanceEndpoint(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/performance", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp storage.PerformanceStats
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Empty database should return zero response time stats
+	if resp.ResponseTime.Count != 0 {
+		t.Errorf("expected ResponseTime.Count = 0, got %d", resp.ResponseTime.Count)
+	}
+}
+
+func TestPerformanceEndpoint_WithRangeFilter(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/performance?range=1h&host=example.com", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp storage.PerformanceStats
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Should return empty stats for filtered query
+	if resp.ResponseTime.Count != 0 {
+		t.Errorf("expected ResponseTime.Count = 0, got %d", resp.ResponseTime.Count)
+	}
+}
+
+func TestBandwidthEndpoint(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/bandwidth", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp storage.BandwidthStats
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Empty database should return zero stats
+	if resp.TotalBytes != 0 {
+		t.Errorf("expected TotalBytes = 0, got %d", resp.TotalBytes)
+	}
+	if resp.TotalHuman != "0 B" {
+		t.Errorf("expected TotalHuman = '0 B', got %s", resp.TotalHuman)
+	}
+}
+
+func TestBandwidthEndpoint_WithRangeFilter(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/bandwidth?range=1h&host=example.com&limit=5", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp storage.BandwidthStats
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Should return empty stats for filtered query
+	if resp.TotalBytes != 0 {
+		t.Errorf("expected TotalBytes = 0, got %d", resp.TotalBytes)
+	}
+}
+
+func TestSessionsEndpoint(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/sessions", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp storage.VisitorSessionSummary
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Empty database should return zero sessions
+	if resp.TotalSessions != 0 {
+		t.Errorf("expected TotalSessions = 0, got %d", resp.TotalSessions)
+	}
+	if resp.BounceRate != 0 {
+		t.Errorf("expected BounceRate = 0, got %f", resp.BounceRate)
+	}
+
+	// Should have SessionsByHour with 24 entries
+	if len(resp.SessionsByHour) != 24 {
+		t.Errorf("expected 24 hour buckets, got %d", len(resp.SessionsByHour))
+	}
+}
+
+func TestSessionsEndpoint_WithFilters(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/sessions?range=1h&host=example.com&limit=10&timeout=900", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp storage.VisitorSessionSummary
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Should return empty stats for filtered query on empty db
+	if resp.TotalSessions != 0 {
+		t.Errorf("expected TotalSessions = 0, got %d", resp.TotalSessions)
+	}
+}
