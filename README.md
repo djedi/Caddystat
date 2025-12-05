@@ -227,6 +227,8 @@ The Go server serves `web/_site` at `/`.
 - `GET /api/stats/requests?range=24h` – hourly buckets.
 - `GET /api/stats/geo?range=24h` – country/region/city counts (empty if GeoLite not configured).
 - `GET /api/sse` – server-sent events with live summary snapshots.
+- `GET /metrics` – Prometheus metrics endpoint.
+- `GET /health` – health check endpoint (returns DB status and version).
 
 ## Development
 

@@ -12,7 +12,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/dustin/Caddystat/internal/config"
+	"github.com/dustin/Caddystat/internal/metrics"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
 	"github.com/dustin/Caddystat/internal/version"
@@ -24,15 +27,17 @@ type Server struct {
 	mux         *http.ServeMux
 	cfg         config.Config
 	rateLimiter *RateLimiter
+	metrics     *metrics.Metrics
 }
 
-func New(store *storage.Storage, hub *sse.Hub, cfg config.Config) *Server {
+func New(store *storage.Storage, hub *sse.Hub, cfg config.Config, m *metrics.Metrics) *Server {
 	s := &Server{
 		store:       store,
 		hub:         hub,
 		mux:         http.NewServeMux(),
 		cfg:         cfg,
 		rateLimiter: NewRateLimiter(cfg.RateLimitPerMinute, time.Minute),
+		metrics:     m,
 	}
 	s.routes()
 	return s
@@ -42,6 +47,7 @@ func (s *Server) routes() {
 	// Public endpoints (no auth required)
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/robots.txt", s.handleRobotsTxt)
+	s.mux.Handle("/metrics", promhttp.Handler())
 
 	// Auth endpoints (always accessible, POST endpoints require CSRF)
 	s.mux.HandleFunc("/api/auth/login", s.requireCSRF(s.handleLogin))
@@ -67,6 +73,8 @@ func (s *Server) routes() {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	// Prevent search engine indexing
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 
@@ -83,6 +91,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ip := extractIP(r)
 		if !s.rateLimiter.Allow(ip) {
 			slog.Debug("rate limit exceeded", "ip", ip, "path", r.URL.Path)
+			if s.metrics != nil {
+				s.metrics.RecordHTTPRequest(r.Method, r.URL.Path, "429", time.Since(start).Seconds())
+			}
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -90,6 +101,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Apply body size limit
 	if s.cfg.MaxRequestBodyBytes > 0 && r.ContentLength > s.cfg.MaxRequestBodyBytes {
+		if s.metrics != nil {
+			s.metrics.RecordHTTPRequest(r.Method, r.URL.Path, "413", time.Since(start).Seconds())
+		}
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -97,7 +111,55 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestBodyBytes)
 	}
 
-	s.mux.ServeHTTP(w, r)
+	// Wrap response writer to capture status code
+	wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+	s.mux.ServeHTTP(wrapped, r)
+
+	// Record metrics (skip /metrics endpoint to avoid self-referential metrics)
+	if s.metrics != nil && r.URL.Path != "/metrics" {
+		s.metrics.RecordHTTPRequest(r.Method, normalizePath(r.URL.Path), strconv.Itoa(wrapped.statusCode), time.Since(start).Seconds())
+	}
+}
+
+// responseWriter wraps http.ResponseWriter to capture the status code.
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements http.Flusher, required for SSE streaming.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap returns the underlying ResponseWriter for interface assertions.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
+// normalizePath reduces cardinality by grouping dynamic path segments.
+func normalizePath(path string) string {
+	// Normalize common API paths to reduce cardinality
+	if len(path) > 0 && path[0] == '/' {
+		// Keep API paths as-is since they're already grouped
+		if len(path) >= 4 && path[:4] == "/api" {
+			return path
+		}
+		// Static paths
+		switch path {
+		case "/", "/health", "/metrics", "/robots.txt":
+			return path
+		}
+	}
+	// Group all other paths as static assets
+	return "/static"
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

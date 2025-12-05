@@ -24,7 +24,7 @@ func TestBodySizeLimit_ContentLengthCheck(t *testing.T) {
 	cfg := config.Config{
 		MaxRequestBodyBytes: 100, // 100 bytes max
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	// Create a request with Content-Length > limit
 	body := strings.Repeat("x", 200)
@@ -51,7 +51,7 @@ func TestBodySizeLimit_MaxBytesReader(t *testing.T) {
 	cfg := config.Config{
 		MaxRequestBodyBytes: 100, // 100 bytes max
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	// Create a request without Content-Length but with large body
 	body := strings.Repeat("x", 200)
@@ -77,7 +77,7 @@ func TestBodySizeLimit_Disabled(t *testing.T) {
 	cfg := config.Config{
 		MaxRequestBodyBytes: 0, // Disabled
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	// Create a request with large body - should not be rejected for size
 	body := `{"username":"test","password":"test"}`
@@ -105,7 +105,7 @@ func TestBodySizeLimit_SmallRequest(t *testing.T) {
 	cfg := config.Config{
 		MaxRequestBodyBytes: 1000, // 1KB max
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	// Create a small request that should pass
 	body := `{"username":"test","password":"test"}`

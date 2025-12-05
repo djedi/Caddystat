@@ -15,6 +15,7 @@ import (
 	"github.com/dustin/Caddystat/internal/config"
 	"github.com/dustin/Caddystat/internal/ingest"
 	"github.com/dustin/Caddystat/internal/logging"
+	"github.com/dustin/Caddystat/internal/metrics"
 	"github.com/dustin/Caddystat/internal/server"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
@@ -72,7 +73,40 @@ func main() {
 	}
 
 	hub := sse.NewHub()
-	ingestor := ingest.New(cfg, store, hub, geo)
+
+	// Initialize Prometheus metrics
+	m := metrics.New(
+		hub.ClientCount,
+		func() int64 {
+			dbPath := store.DBPath()
+			if dbPath == "" {
+				return 0
+			}
+			fi, err := os.Stat(dbPath)
+			if err != nil {
+				return 0
+			}
+			return fi.Size()
+		},
+		func() metrics.DBStats {
+			stats, err := store.GetDatabaseStats(context.Background())
+			if err != nil {
+				return metrics.DBStats{}
+			}
+			return metrics.DBStats{
+				RequestsCount:       stats.RequestsCount,
+				SessionsCount:       stats.SessionsCount,
+				RollupsHourlyCount:  stats.RollupsHourlyCount,
+				RollupsDailyCount:   stats.RollupsDailyCount,
+				ImportProgressCount: stats.ImportProgressCount,
+			}
+		},
+	)
+	if err := m.Register(); err != nil {
+		slog.Warn("failed to register Prometheus metrics", "error", err)
+	}
+
+	ingestor := ingest.New(cfg, store, hub, geo, m)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -109,7 +143,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    cfg.ListenAddr,
-		Handler: server.New(store, hub, cfg),
+		Handler: server.New(store, hub, cfg, m),
 	}
 
 	go func() {

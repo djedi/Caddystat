@@ -54,12 +54,12 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### Monitoring & Metrics
 
-- [ ] Add Prometheus metrics endpoint (`GET /metrics`)
-  - [ ] Request count by endpoint, status, method
-  - [ ] Request latency histogram
-  - [ ] SSE subscriber count
-  - [ ] Database size and row counts
-  - [ ] Ingestion rate (requests/second)
+- [x] Add Prometheus metrics endpoint (`GET /metrics`)
+  - [x] Request count by endpoint, status, method
+  - [x] Request latency histogram
+  - [x] SSE subscriber count
+  - [x] Database size and row counts
+  - [x] Ingestion rate (requests/second)
 - [ ] Add optional metrics for geo lookups, cache hit rates
 
 ### Data Export
@@ -263,14 +263,14 @@ Items that should be addressed for long-term maintainability:
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
 | Security & Stability     | 21      | 18        | 86%        |
-| Performance & Operations | 16      | 0         | 0%         |
+| Performance & Operations | 16      | 6         | 38%        |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
 | Nice-to-Have             | 21      | 0         | 0%         |
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **122** | **29**    | **24%**    |
+| **Total**                | **122** | **35**    | **29%**    |
 
 ---
 

@@ -21,26 +21,29 @@ import (
 	"github.com/oschwald/maxminddb-golang"
 
 	"github.com/dustin/Caddystat/internal/config"
+	"github.com/dustin/Caddystat/internal/metrics"
 	"github.com/dustin/Caddystat/internal/sse"
 	"github.com/dustin/Caddystat/internal/storage"
 	"github.com/dustin/Caddystat/internal/useragent"
 )
 
 type Ingestor struct {
-	cfg    config.Config
-	store  *storage.Storage
-	hub    *sse.Hub
-	geo    *GeoLookup
-	wg     sync.WaitGroup
-	cancel context.CancelFunc
+	cfg     config.Config
+	store   *storage.Storage
+	hub     *sse.Hub
+	geo     *GeoLookup
+	metrics *metrics.Metrics
+	wg      sync.WaitGroup
+	cancel  context.CancelFunc
 }
 
-func New(cfg config.Config, store *storage.Storage, hub *sse.Hub, geo *GeoLookup) *Ingestor {
+func New(cfg config.Config, store *storage.Storage, hub *sse.Hub, geo *GeoLookup, m *metrics.Metrics) *Ingestor {
 	return &Ingestor{
-		cfg:   cfg,
-		store: store,
-		hub:   hub,
-		geo:   geo,
+		cfg:     cfg,
+		store:   store,
+		hub:     hub,
+		geo:     geo,
+		metrics: m,
 	}
 }
 
@@ -311,8 +314,13 @@ func (i *Ingestor) tailFile(ctx context.Context, path string) {
 }
 
 func (i *Ingestor) handleLine(ctx context.Context, line string) error {
+	start := time.Now()
+
 	entry, err := parseCaddyLog(line)
 	if err != nil {
+		if i.metrics != nil {
+			i.metrics.RecordIngestError()
+		}
 		return err
 	}
 	ip := normalizeIP(entry.RemoteAddr)
@@ -354,6 +362,14 @@ func (i *Ingestor) handleLine(ctx context.Context, line string) error {
 	}
 	if err := i.store.InsertRequest(ctx, record); err != nil {
 		return err
+	}
+
+	// Record metrics
+	if i.metrics != nil {
+		i.metrics.RecordIngest(time.Since(start).Seconds(), record.Bytes)
+		if !record.Timestamp.IsZero() {
+			i.metrics.SetLastIngestTimestamp(float64(record.Timestamp.Unix()))
+		}
 	}
 
 	if i.hub != nil {

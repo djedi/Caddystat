@@ -37,7 +37,7 @@ func setupTestServerWithData(t *testing.T) (*Server, func()) {
 		ListenAddr: ":8404",
 		DBPath:     dbPath,
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	// Insert sample data
 	ctx := context.Background()
@@ -552,7 +552,7 @@ func setupTestServerWithAuth(t *testing.T) (*Server, func()) {
 		AuthUsername: "admin",
 		AuthPassword: "secret123",
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	cleanup := func() {
 		store.Close()
@@ -583,7 +583,7 @@ func setupTestServerWithAuthAndData(t *testing.T) (*Server, func()) {
 		AuthUsername: "admin",
 		AuthPassword: "secret123",
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	// Insert sample data
 	ctx := context.Background()

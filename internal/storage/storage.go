@@ -1356,3 +1356,48 @@ func (s *Storage) CleanupExpiredSessions(ctx context.Context) (int64, error) {
 	}
 	return result.RowsAffected()
 }
+
+// DatabaseStats holds statistics about the database tables.
+type DatabaseStats struct {
+	RequestsCount       int64
+	SessionsCount       int64
+	RollupsHourlyCount  int64
+	RollupsDailyCount   int64
+	ImportProgressCount int64
+}
+
+// GetDatabaseStats returns row counts for all tables.
+func (s *Storage) GetDatabaseStats(ctx context.Context) (DatabaseStats, error) {
+	var stats DatabaseStats
+	queries := []struct {
+		query string
+		dest  *int64
+	}{
+		{"SELECT COUNT(*) FROM requests", &stats.RequestsCount},
+		{"SELECT COUNT(*) FROM sessions", &stats.SessionsCount},
+		{"SELECT COUNT(*) FROM rollups_hourly", &stats.RollupsHourlyCount},
+		{"SELECT COUNT(*) FROM rollups_daily", &stats.RollupsDailyCount},
+		{"SELECT COUNT(*) FROM import_progress", &stats.ImportProgressCount},
+	}
+
+	for _, q := range queries {
+		row := s.db.QueryRowContext(ctx, q.query)
+		if err := row.Scan(q.dest); err != nil {
+			return stats, fmt.Errorf("query %q: %w", q.query, err)
+		}
+	}
+	return stats, nil
+}
+
+// DBPath returns the database file path.
+func (s *Storage) DBPath() string {
+	// Query the database for its file path
+	var path string
+	row := s.db.QueryRow("PRAGMA database_list")
+	var seq int
+	var name string
+	if err := row.Scan(&seq, &name, &path); err != nil {
+		return ""
+	}
+	return path
+}

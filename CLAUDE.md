@@ -94,3 +94,5 @@ web/                      Frontend (Alpine.js + Tailwind, built with PostCSS)
 - `GET /api/auth/check` - Check authentication status
 - `POST /api/auth/login` - Login with username/password
 - `POST /api/auth/logout` - Logout and clear session
+- `GET /health` - Health check (DB status, version)
+- `GET /metrics` - Prometheus metrics endpoint

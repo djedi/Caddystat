@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dustin/Caddystat/internal/config"
@@ -33,7 +34,7 @@ func setupTestServer(t *testing.T) (*Server, func()) {
 		ListenAddr: ":8404",
 		DBPath:     dbPath,
 	}
-	srv := New(store, hub, cfg)
+	srv := New(store, hub, cfg, nil)
 
 	cleanup := func() {
 		store.Close()
@@ -120,5 +121,31 @@ func TestXRobotsTagHeader(t *testing.T) {
 				t.Errorf("expected X-Robots-Tag 'noindex, nofollow', got %q", robotsTag)
 			}
 		})
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Should return Prometheus text format (various versions may exist)
+	ct := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("expected Prometheus text format Content-Type starting with 'text/plain', got %q", ct)
+	}
+
+	// Should contain some standard Go metrics
+	body := w.Body.String()
+	if len(body) == 0 {
+		t.Error("expected non-empty metrics body")
 	}
 }

@@ -1133,3 +1133,69 @@ func TestStorage_CreateSession_DuplicateToken(t *testing.T) {
 		t.Error("expected error on duplicate token, got nil")
 	}
 }
+
+func TestStorage_GetDatabaseStats(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Initially all tables should be empty
+	stats, err := s.GetDatabaseStats(ctx)
+	if err != nil {
+		t.Fatalf("GetDatabaseStats() error = %v", err)
+	}
+	if stats.RequestsCount != 0 {
+		t.Errorf("RequestsCount = %d, want 0", stats.RequestsCount)
+	}
+	if stats.SessionsCount != 0 {
+		t.Errorf("SessionsCount = %d, want 0", stats.SessionsCount)
+	}
+
+	// Add a request
+	now := time.Now().UTC()
+	req := RequestRecord{
+		Timestamp: now,
+		Host:      "example.com",
+		Path:      "/",
+		Status:    200,
+		Bytes:     1024,
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest() error = %v", err)
+	}
+
+	// Add a session
+	if err := s.CreateSession(ctx, "test-token", now.Add(24*time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Check updated stats
+	stats, err = s.GetDatabaseStats(ctx)
+	if err != nil {
+		t.Fatalf("GetDatabaseStats() error = %v", err)
+	}
+	if stats.RequestsCount != 1 {
+		t.Errorf("RequestsCount = %d, want 1", stats.RequestsCount)
+	}
+	if stats.SessionsCount != 1 {
+		t.Errorf("SessionsCount = %d, want 1", stats.SessionsCount)
+	}
+	// Rollups should also be created (hourly and daily)
+	if stats.RollupsHourlyCount < 1 {
+		t.Errorf("RollupsHourlyCount = %d, want >= 1", stats.RollupsHourlyCount)
+	}
+	if stats.RollupsDailyCount < 1 {
+		t.Errorf("RollupsDailyCount = %d, want >= 1", stats.RollupsDailyCount)
+	}
+}
+
+func TestStorage_DBPath(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	path := s.DBPath()
+	if path == "" {
+		t.Error("DBPath() returned empty string")
+	}
+}
