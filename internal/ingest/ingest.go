@@ -410,18 +410,47 @@ func (i *Ingestor) handleLine(ctx context.Context, line string) error {
 }
 
 type GeoLookup struct {
-	db *maxminddb.Reader
+	db    *maxminddb.Reader
+	cache *GeoCache
 }
 
+// GeoLookupConfig holds configuration for GeoLookup.
+type GeoLookupConfig struct {
+	// Path to the MaxMind database file.
+	DBPath string
+
+	// Cache configuration. If nil, default configuration is used.
+	CacheConfig *GeoCacheConfig
+}
+
+// NewGeo creates a new GeoLookup with an LRU cache.
+// If path is empty, returns nil (no geo lookups will be performed).
 func NewGeo(path string) (*GeoLookup, error) {
-	if path == "" {
+	return NewGeoWithConfig(GeoLookupConfig{DBPath: path})
+}
+
+// NewGeoWithConfig creates a new GeoLookup with custom cache configuration.
+func NewGeoWithConfig(cfg GeoLookupConfig) (*GeoLookup, error) {
+	if cfg.DBPath == "" {
 		return nil, nil
 	}
-	db, err := maxminddb.Open(path)
+	db, err := maxminddb.Open(cfg.DBPath)
 	if err != nil {
 		return nil, err
 	}
-	return &GeoLookup{db: db}, nil
+
+	// Use provided cache config or defaults
+	var cacheConfig GeoCacheConfig
+	if cfg.CacheConfig != nil {
+		cacheConfig = *cfg.CacheConfig
+	} else {
+		cacheConfig = DefaultGeoCacheConfig()
+	}
+
+	return &GeoLookup{
+		db:    db,
+		cache: NewGeoCache(cacheConfig),
+	}, nil
 }
 
 // Close closes the MaxMind database reader.
@@ -432,12 +461,27 @@ func (g *GeoLookup) Close() error {
 	return g.db.Close()
 }
 
+// Lookup returns the country, region, and city for the given IP address.
+// Results are cached to improve performance for repeated lookups.
 func (g *GeoLookup) Lookup(ip string) (string, string, string) {
 	if g == nil || g.db == nil || ip == "" {
 		return "", "", ""
 	}
+
+	// Check cache first
+	if g.cache != nil {
+		if result, ok := g.cache.Get(ip); ok {
+			return result.Country, result.Region, result.City
+		}
+	}
+
+	// Cache miss - do the actual lookup
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
+		// Cache empty result for invalid IPs to avoid repeated parsing attempts
+		if g.cache != nil {
+			g.cache.Set(ip, GeoResult{})
+		}
 		return "", "", ""
 	}
 	var record struct {
@@ -453,6 +497,10 @@ func (g *GeoLookup) Lookup(ip string) (string, string, string) {
 		} `maxminddb:"city"`
 	}
 	if err := g.db.Lookup(parsed, &record); err != nil {
+		// Cache empty result for failed lookups (e.g., IP not in database)
+		if g.cache != nil {
+			g.cache.Set(ip, GeoResult{})
+		}
 		return "", "", ""
 	}
 	country := record.Country.ISO
@@ -461,7 +509,27 @@ func (g *GeoLookup) Lookup(ip string) (string, string, string) {
 		region = record.Subdivisions[0].Names["en"]
 	}
 	city := record.City.Names["en"]
+
+	// Store result in cache
+	if g.cache != nil {
+		g.cache.Set(ip, GeoResult{
+			Country: country,
+			Region:  region,
+			City:    city,
+		})
+	}
+
 	return country, region, city
+}
+
+// CacheStats returns statistics about the geo cache.
+// Returns nil if no cache is configured.
+func (g *GeoLookup) CacheStats() *GeoCacheStats {
+	if g == nil || g.cache == nil {
+		return nil
+	}
+	stats := g.cache.Stats()
+	return &stats
 }
 
 type caddyLogEntry struct {

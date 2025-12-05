@@ -104,6 +104,23 @@ func main() {
 				ImportProgressCount: stats.ImportProgressCount,
 			}
 		},
+		func() *metrics.GeoCacheStats {
+			if geo == nil {
+				return nil
+			}
+			stats := geo.CacheStats()
+			if stats == nil {
+				return nil
+			}
+			return &metrics.GeoCacheStats{
+				Size:     stats.Size,
+				Capacity: stats.Capacity,
+				Hits:     stats.Hits,
+				Misses:   stats.Misses,
+				Evicts:   stats.Evicts,
+				HitRate:  stats.HitRate,
+			}
+		},
 	)
 	if err := m.Register(); err != nil {
 		slog.Warn("failed to register Prometheus metrics", "error", err)

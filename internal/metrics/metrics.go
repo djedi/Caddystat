@@ -30,6 +30,14 @@ type Metrics struct {
 	DBRollupsHourly  prometheus.GaugeFunc
 	DBRollupsDaily   prometheus.GaugeFunc
 	DBImportProgress prometheus.GaugeFunc
+
+	// GeoIP cache metrics
+	GeoCacheSize     prometheus.GaugeFunc
+	GeoCacheHits     prometheus.GaugeFunc
+	GeoCacheMisses   prometheus.GaugeFunc
+	GeoCacheEvicts   prometheus.GaugeFunc
+	GeoCacheHitRate  prometheus.GaugeFunc
+	GeoCacheCapacity prometheus.GaugeFunc
 }
 
 // DBStats represents database statistics returned by the stats provider function.
@@ -39,6 +47,16 @@ type DBStats struct {
 	RollupsHourlyCount  int64
 	RollupsDailyCount   int64
 	ImportProgressCount int64
+}
+
+// GeoCacheStats represents geo cache statistics returned by the stats provider function.
+type GeoCacheStats struct {
+	Size     int
+	Capacity int
+	Hits     uint64
+	Misses   uint64
+	Evicts   uint64
+	HitRate  float64
 }
 
 // cachedDBStats caches the result of dbStatsFunc for all gauge funcs in a single scrape.
@@ -80,12 +98,26 @@ func (c *cachedDBStats) get() DBStats {
 
 // New creates and registers all Prometheus metrics.
 // The dbStatsFunc is called to retrieve database statistics (cached for 1 second).
+// The geoCacheStatsFunc is optional and can be nil if no geo cache is configured.
 func New(
 	sseClientCountFunc func() int,
 	dbSizeFunc func() int64,
 	dbStatsFunc func() DBStats,
+	geoCacheStatsFunc func() *GeoCacheStats,
 ) *Metrics {
 	cache := newCachedDBStats(dbStatsFunc)
+
+	// Helper to safely get geo cache stats (handles nil function)
+	getGeoStats := func() GeoCacheStats {
+		if geoCacheStatsFunc == nil {
+			return GeoCacheStats{}
+		}
+		stats := geoCacheStatsFunc()
+		if stats == nil {
+			return GeoCacheStats{}
+		}
+		return *stats
+	}
 
 	m := &Metrics{
 		HTTPRequestsTotal: prometheus.NewCounterVec(
@@ -225,6 +257,72 @@ func New(
 				return float64(cache.get().ImportProgressCount)
 			},
 		),
+		GeoCacheSize: prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: "caddystat",
+				Subsystem: "geo",
+				Name:      "cache_size",
+				Help:      "Current number of entries in the geo cache",
+			},
+			func() float64 {
+				return float64(getGeoStats().Size)
+			},
+		),
+		GeoCacheCapacity: prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: "caddystat",
+				Subsystem: "geo",
+				Name:      "cache_capacity",
+				Help:      "Maximum capacity of the geo cache",
+			},
+			func() float64 {
+				return float64(getGeoStats().Capacity)
+			},
+		),
+		GeoCacheHits: prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: "caddystat",
+				Subsystem: "geo",
+				Name:      "cache_hits_total",
+				Help:      "Total number of geo cache hits",
+			},
+			func() float64 {
+				return float64(getGeoStats().Hits)
+			},
+		),
+		GeoCacheMisses: prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: "caddystat",
+				Subsystem: "geo",
+				Name:      "cache_misses_total",
+				Help:      "Total number of geo cache misses",
+			},
+			func() float64 {
+				return float64(getGeoStats().Misses)
+			},
+		),
+		GeoCacheEvicts: prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: "caddystat",
+				Subsystem: "geo",
+				Name:      "cache_evictions_total",
+				Help:      "Total number of geo cache evictions due to capacity",
+			},
+			func() float64 {
+				return float64(getGeoStats().Evicts)
+			},
+		),
+		GeoCacheHitRate: prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: "caddystat",
+				Subsystem: "geo",
+				Name:      "cache_hit_rate",
+				Help:      "Geo cache hit rate (0.0 to 1.0)",
+			},
+			func() float64 {
+				return getGeoStats().HitRate
+			},
+		),
 	}
 
 	return m
@@ -247,6 +345,12 @@ func (m *Metrics) Register() error {
 		m.DBRollupsHourly,
 		m.DBRollupsDaily,
 		m.DBImportProgress,
+		m.GeoCacheSize,
+		m.GeoCacheCapacity,
+		m.GeoCacheHits,
+		m.GeoCacheMisses,
+		m.GeoCacheEvicts,
+		m.GeoCacheHitRate,
 	}
 
 	for _, c := range collectors {

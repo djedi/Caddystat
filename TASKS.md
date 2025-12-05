@@ -50,7 +50,7 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 - [x] Use prepared statements for frequently-run queries
 - [x] Add VACUUM scheduling (or trigger after bulk imports)
 - [x] Add time-based filter to `RecentRequests()` query to avoid full table scan
-- [ ] Cache GeoIP lookups in memory (LRU cache with TTL)
+- [x] Cache GeoIP lookups in memory (LRU cache with TTL)
 
 ### Monitoring & Metrics
 
@@ -60,7 +60,7 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
   - [x] SSE subscriber count
   - [x] Database size and row counts
   - [x] Ingestion rate (requests/second)
-- [ ] Add optional metrics for geo lookups, cache hit rates
+- [x] Add optional metrics for geo lookups, cache hit rates
 
 ### Data Export
 
@@ -263,14 +263,14 @@ Items that should be addressed for long-term maintainability:
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
 | Security & Stability     | 21      | 21        | 100%       |
-| Performance & Operations | 16      | 11        | 69%        |
+| Performance & Operations | 16      | 13        | 81%        |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
 | Nice-to-Have             | 21      | 0         | 0%         |
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **122** | **43**    | **35%**    |
+| **Total**                | **122** | **45**    | **37%**    |
 
 ---
 

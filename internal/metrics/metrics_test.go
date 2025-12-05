@@ -23,6 +23,7 @@ func TestMetrics_New(t *testing.T) {
 		func() int { return sseCount },
 		func() int64 { return dbSize },
 		func() DBStats { return dbStats },
+		nil, // no geo cache
 	)
 
 	if m == nil {
@@ -191,6 +192,7 @@ func TestMetrics_GaugeFuncs(t *testing.T) {
 		func() int { return sseCount },
 		func() int64 { return dbSize },
 		func() DBStats { return dbStats },
+		nil, // no geo cache
 	)
 
 	// Test SSE subscribers gauge
@@ -244,6 +246,7 @@ func TestMetrics_Register(t *testing.T) {
 		func() int { return 0 },
 		func() int64 { return 0 },
 		func() DBStats { return DBStats{} },
+		nil, // no geo cache
 	)
 
 	err := m.Register()
@@ -258,5 +261,95 @@ func TestMetrics_Register(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already registered") && !strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("expected 'already registered' or 'duplicate' error, got: %v", err)
+	}
+}
+
+func TestMetrics_GeoCacheGaugeFuncs(t *testing.T) {
+	geoStats := &GeoCacheStats{
+		Size:     500,
+		Capacity: 10000,
+		Hits:     1000,
+		Misses:   200,
+		Evicts:   50,
+		HitRate:  0.833,
+	}
+
+	m := New(
+		func() int { return 0 },
+		func() int64 { return 0 },
+		func() DBStats { return DBStats{} },
+		func() *GeoCacheStats { return geoStats },
+	)
+
+	// Test geo cache size
+	val := testutil.ToFloat64(m.GeoCacheSize)
+	if val != float64(geoStats.Size) {
+		t.Errorf("Geo cache size: expected %d, got %v", geoStats.Size, val)
+	}
+
+	// Test geo cache capacity
+	val = testutil.ToFloat64(m.GeoCacheCapacity)
+	if val != float64(geoStats.Capacity) {
+		t.Errorf("Geo cache capacity: expected %d, got %v", geoStats.Capacity, val)
+	}
+
+	// Test geo cache hits
+	val = testutil.ToFloat64(m.GeoCacheHits)
+	if val != float64(geoStats.Hits) {
+		t.Errorf("Geo cache hits: expected %d, got %v", geoStats.Hits, val)
+	}
+
+	// Test geo cache misses
+	val = testutil.ToFloat64(m.GeoCacheMisses)
+	if val != float64(geoStats.Misses) {
+		t.Errorf("Geo cache misses: expected %d, got %v", geoStats.Misses, val)
+	}
+
+	// Test geo cache evictions
+	val = testutil.ToFloat64(m.GeoCacheEvicts)
+	if val != float64(geoStats.Evicts) {
+		t.Errorf("Geo cache evicts: expected %d, got %v", geoStats.Evicts, val)
+	}
+
+	// Test geo cache hit rate
+	val = testutil.ToFloat64(m.GeoCacheHitRate)
+	if val != geoStats.HitRate {
+		t.Errorf("Geo cache hit rate: expected %v, got %v", geoStats.HitRate, val)
+	}
+}
+
+func TestMetrics_GeoCacheNilStatsFunc(t *testing.T) {
+	// Test with nil stats function
+	m := New(
+		func() int { return 0 },
+		func() int64 { return 0 },
+		func() DBStats { return DBStats{} },
+		nil,
+	)
+
+	// All geo cache metrics should return 0 when stats function is nil
+	if val := testutil.ToFloat64(m.GeoCacheSize); val != 0 {
+		t.Errorf("expected 0 for nil geo stats, got %v", val)
+	}
+	if val := testutil.ToFloat64(m.GeoCacheHitRate); val != 0 {
+		t.Errorf("expected 0 for nil geo stats hit rate, got %v", val)
+	}
+}
+
+func TestMetrics_GeoCacheReturnsNilStats(t *testing.T) {
+	// Test with stats function that returns nil
+	m := New(
+		func() int { return 0 },
+		func() int64 { return 0 },
+		func() DBStats { return DBStats{} },
+		func() *GeoCacheStats { return nil },
+	)
+
+	// All geo cache metrics should return 0 when stats function returns nil
+	if val := testutil.ToFloat64(m.GeoCacheSize); val != 0 {
+		t.Errorf("expected 0 for nil geo stats, got %v", val)
+	}
+	if val := testutil.ToFloat64(m.GeoCacheHits); val != 0 {
+		t.Errorf("expected 0 for nil geo stats hits, got %v", val)
 	}
 }
