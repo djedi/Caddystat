@@ -45,9 +45,9 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### Database Optimization
 
-- [ ] Add configurable connection pool size (`DB_MAX_CONNECTIONS` env var)
-- [ ] Add query timeout configuration (`DB_QUERY_TIMEOUT` env var)
-- [ ] Use prepared statements for frequently-run queries
+- [x] Add configurable connection pool size (`DB_MAX_CONNECTIONS` env var)
+- [x] Add query timeout configuration (`DB_QUERY_TIMEOUT` env var)
+- [x] Use prepared statements for frequently-run queries
 - [ ] Add VACUUM scheduling (or trigger after bulk imports)
 - [ ] Add time-based filter to `RecentRequests()` query to avoid full table scan
 - [ ] Cache GeoIP lookups in memory (LRU cache with TTL)
@@ -263,14 +263,14 @@ Items that should be addressed for long-term maintainability:
 | Category                 | Total   | Completed | Percentage |
 | ------------------------ | ------- | --------- | ---------- |
 | Security & Stability     | 21      | 21        | 100%       |
-| Performance & Operations | 16      | 6         | 38%        |
+| Performance & Operations | 16      | 9         | 56%        |
 | New Features             | 20      | 0         | 0%         |
 | Frontend                 | 18      | 0         | 0%         |
 | Nice-to-Have             | 21      | 0         | 0%         |
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 1         | 13%        |
 | Technical Debt           | 8       | 0         | 0%         |
-| **Total**                | **122** | **38**    | **31%**    |
+| **Total**                | **122** | **41**    | **34%**    |
 
 ---
 

@@ -27,6 +27,8 @@ type Config struct {
 	LogLevel                logging.Level
 	RateLimitPerMinute      int
 	MaxRequestBodyBytes     int64
+	DBMaxConnections        int
+	DBQueryTimeout          time.Duration
 }
 
 func Load() Config {
@@ -47,6 +49,8 @@ func Load() Config {
 		LogLevel:                logging.ParseLevel(getEnv("LOG_LEVEL", "INFO")),
 		RateLimitPerMinute:      getEnvInt("RATE_LIMIT_PER_MINUTE", 0),
 		MaxRequestBodyBytes:     getEnvInt64("MAX_REQUEST_BODY_BYTES", 1<<20), // 1MB default
+		DBMaxConnections:        getEnvInt("DB_MAX_CONNECTIONS", 1),
+		DBQueryTimeout:          getEnvDuration("DB_QUERY_TIMEOUT", 30*time.Second),
 	}
 
 	return cfg

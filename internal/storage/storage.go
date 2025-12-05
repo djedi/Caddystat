@@ -162,11 +162,34 @@ type ReferrerStat struct {
 }
 
 type Storage struct {
-	db      *sql.DB
-	writeMu sync.Mutex
+	db           *sql.DB
+	writeMu      sync.Mutex
+	queryTimeout time.Duration
+
+	// Prepared statements for frequently-run queries
+	stmtInsertRequest *sql.Stmt
+	stmtInsertSession *sql.Stmt
+	stmtGetSession    *sql.Stmt
+	stmtDeleteSession *sql.Stmt
 }
 
+// Options configures the Storage instance.
+type Options struct {
+	MaxConnections int
+	QueryTimeout   time.Duration
+}
+
+// New creates a new Storage instance with default options.
+// For custom options, use NewWithOptions.
 func New(dbPath string) (*Storage, error) {
+	return NewWithOptions(dbPath, Options{
+		MaxConnections: 1,
+		QueryTimeout:   30 * time.Second,
+	})
+}
+
+// NewWithOptions creates a new Storage instance with the given options.
+func NewWithOptions(dbPath string, opts Options) (*Storage, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
@@ -174,11 +197,31 @@ func New(dbPath string) (*Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Limit to single connection for writes to avoid lock contention
-	db.SetMaxOpenConns(1)
-	s := &Storage{db: db}
+
+	// Configure connection pool
+	maxConns := opts.MaxConnections
+	if maxConns <= 0 {
+		maxConns = 1
+	}
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(maxConns)
+
+	queryTimeout := opts.QueryTimeout
+	if queryTimeout <= 0 {
+		queryTimeout = 30 * time.Second
+	}
+
+	s := &Storage{
+		db:           db,
+		queryTimeout: queryTimeout,
+	}
 	if err := s.migrate(); err != nil {
+		db.Close()
 		return nil, err
+	}
+	if err := s.prepareStatements(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("prepare statements: %w", err)
 	}
 	return s, nil
 }
@@ -274,8 +317,57 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 	return nil
 }
 
+func (s *Storage) prepareStatements() error {
+	var err error
+
+	// Prepare insert request statement
+	s.stmtInsertRequest, err = s.db.Prepare(`
+INSERT INTO requests (ts, host, path, status, bytes, ip, referrer, user_agent, resp_time_ms, country, region, city, browser, browser_version, os, os_version, device_type, is_bot, bot_name)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`)
+	if err != nil {
+		return fmt.Errorf("prepare insert request: %w", err)
+	}
+
+	// Prepare session statements
+	s.stmtInsertSession, err = s.db.Prepare(`INSERT INTO sessions (token, expires_at, created_at) VALUES (?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare insert session: %w", err)
+	}
+
+	s.stmtGetSession, err = s.db.Prepare(`SELECT token, expires_at, created_at FROM sessions WHERE token = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare get session: %w", err)
+	}
+
+	s.stmtDeleteSession, err = s.db.Prepare(`DELETE FROM sessions WHERE token = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare delete session: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Storage) Close() error {
+	// Close prepared statements
+	if s.stmtInsertRequest != nil {
+		s.stmtInsertRequest.Close()
+	}
+	if s.stmtInsertSession != nil {
+		s.stmtInsertSession.Close()
+	}
+	if s.stmtGetSession != nil {
+		s.stmtGetSession.Close()
+	}
+	if s.stmtDeleteSession != nil {
+		s.stmtDeleteSession.Close()
+	}
 	return s.db.Close()
+}
+
+// QueryTimeout returns the configured query timeout duration.
+func (s *Storage) QueryTimeout() time.Duration {
+	return s.queryTimeout
 }
 
 func (s *Storage) InsertRequest(ctx context.Context, r RequestRecord) error {
@@ -297,10 +389,10 @@ func (s *Storage) InsertRequest(ctx context.Context, r RequestRecord) error {
 	if r.IsBot {
 		isBot = 1
 	}
-	_, err = tx.ExecContext(ctx, `
-INSERT INTO requests (ts, host, path, status, bytes, ip, referrer, user_agent, resp_time_ms, country, region, city, browser, browser_version, os, os_version, device_type, is_bot, bot_name)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, r.Timestamp, r.Host, r.Path, r.Status, r.Bytes, r.IP, r.Referrer, r.UserAgent, r.ResponseTime, r.Country, r.Region, r.City, r.Browser, r.BrowserVersion, r.OS, r.OSVersion, r.DeviceType, isBot, r.BotName)
+
+	// Use prepared statement within the transaction
+	stmt := tx.StmtContext(ctx, s.stmtInsertRequest)
+	_, err = stmt.ExecContext(ctx, r.Timestamp, r.Host, r.Path, r.Status, r.Bytes, r.IP, r.Referrer, r.UserAgent, r.ResponseTime, r.Country, r.Region, r.City, r.Browser, r.BrowserVersion, r.OS, r.OSVersion, r.DeviceType, isBot, r.BotName)
 	if err != nil {
 		return err
 	}
@@ -1299,9 +1391,7 @@ func (s *Storage) CreateSession(ctx context.Context, token string, expiresAt tim
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token, expires_at, created_at) VALUES (?, ?, ?)`,
-		token, expiresAt, time.Now().UTC())
+	_, err := s.stmtInsertSession.ExecContext(ctx, token, expiresAt, time.Now().UTC())
 	return err
 }
 
@@ -1310,9 +1400,7 @@ func (s *Storage) CreateSession(ctx context.Context, token string, expiresAt tim
 func (s *Storage) GetSession(ctx context.Context, token string) (*Session, error) {
 	var sess Session
 	var expiresStr, createdStr string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT token, expires_at, created_at FROM sessions WHERE token = ?`,
-		token).Scan(&sess.Token, &expiresStr, &createdStr)
+	err := s.stmtGetSession.QueryRowContext(ctx, token).Scan(&sess.Token, &expiresStr, &createdStr)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -1338,7 +1426,7 @@ func (s *Storage) DeleteSession(ctx context.Context, token string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
+	_, err := s.stmtDeleteSession.ExecContext(ctx, token)
 	return err
 }
 

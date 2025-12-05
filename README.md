@@ -72,6 +72,13 @@ Both `AUTH_USERNAME` and `AUTH_PASSWORD` must be set to enable authentication.
 | `RATE_LIMIT_PER_MINUTE`  | `0`       | Max requests per minute per IP (0 = disabled)   |
 | `MAX_REQUEST_BODY_BYTES` | `1048576` | Maximum request body size in bytes (1MB default)|
 
+### Database
+
+| Variable             | Default | Description                                        |
+| -------------------- | ------- | -------------------------------------------------- |
+| `DB_MAX_CONNECTIONS` | `1`     | Maximum database connections (increase for reads)  |
+| `DB_QUERY_TIMEOUT`   | `30s`   | Query timeout duration (e.g., `30s`, `1m`, `2m30s`)|
+
 ### Advanced
 
 | Variable                    | Default | Description                       |

@@ -1312,3 +1312,145 @@ func TestStorage_GetSystemStatus(t *testing.T) {
 		t.Error("LastImportTime is nil, expected a timestamp")
 	}
 }
+
+func TestNewWithOptions(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	opts := Options{
+		MaxConnections: 5,
+		QueryTimeout:   60 * time.Second,
+	}
+
+	s, err := NewWithOptions(dbPath, opts)
+	if err != nil {
+		t.Fatalf("NewWithOptions() error = %v", err)
+	}
+	defer s.Close()
+
+	// Verify query timeout was set
+	if s.QueryTimeout() != 60*time.Second {
+		t.Errorf("QueryTimeout() = %v, want %v", s.QueryTimeout(), 60*time.Second)
+	}
+
+	// Verify database is functional
+	if err := s.Health(context.Background()); err != nil {
+		t.Errorf("Health() error = %v", err)
+	}
+}
+
+func TestNewWithOptions_Defaults(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Test with zero/invalid values (should use defaults)
+	opts := Options{
+		MaxConnections: 0,
+		QueryTimeout:   0,
+	}
+
+	s, err := NewWithOptions(dbPath, opts)
+	if err != nil {
+		t.Fatalf("NewWithOptions() error = %v", err)
+	}
+	defer s.Close()
+
+	// Should use default query timeout
+	if s.QueryTimeout() != 30*time.Second {
+		t.Errorf("QueryTimeout() = %v, want default %v", s.QueryTimeout(), 30*time.Second)
+	}
+}
+
+func TestStorage_PreparedStatements(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Test that prepared statements work for InsertRequest
+	req := RequestRecord{
+		Timestamp:      now,
+		Host:           "example.com",
+		Path:           "/test-prepared",
+		Status:         200,
+		Bytes:          1024,
+		IP:             "192.168.1.1",
+		Browser:        "Chrome",
+		BrowserVersion: "120.0",
+	}
+	if err := s.InsertRequest(ctx, req); err != nil {
+		t.Fatalf("InsertRequest with prepared statement error = %v", err)
+	}
+
+	// Test multiple inserts (prepared statements should handle this efficiently)
+	for i := 0; i < 10; i++ {
+		req.Path = "/test-" + string(rune('a'+i))
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest iteration %d error = %v", i, err)
+		}
+	}
+
+	// Verify requests were inserted
+	recent, err := s.RecentRequests(ctx, 20, "")
+	if err != nil {
+		t.Fatalf("RecentRequests() error = %v", err)
+	}
+	if len(recent) != 11 {
+		t.Errorf("expected 11 requests, got %d", len(recent))
+	}
+}
+
+func TestStorage_PreparedStatements_Sessions(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Test session operations use prepared statements efficiently
+	for i := 0; i < 5; i++ {
+		token := "test-token-" + string(rune('a'+i))
+		expires := time.Now().Add(time.Hour)
+
+		if err := s.CreateSession(ctx, token, expires); err != nil {
+			t.Fatalf("CreateSession(%s) error = %v", token, err)
+		}
+
+		sess, err := s.GetSession(ctx, token)
+		if err != nil {
+			t.Fatalf("GetSession(%s) error = %v", token, err)
+		}
+		if sess == nil {
+			t.Fatalf("GetSession(%s) returned nil", token)
+		}
+		if sess.Token != token {
+			t.Errorf("Token = %q, want %q", sess.Token, token)
+		}
+	}
+
+	// Delete some sessions
+	for i := 0; i < 3; i++ {
+		token := "test-token-" + string(rune('a'+i))
+		if err := s.DeleteSession(ctx, token); err != nil {
+			t.Fatalf("DeleteSession(%s) error = %v", token, err)
+		}
+	}
+
+	// Verify deletions
+	stats, err := s.GetDatabaseStats(ctx)
+	if err != nil {
+		t.Fatalf("GetDatabaseStats() error = %v", err)
+	}
+	if stats.SessionsCount != 2 {
+		t.Errorf("SessionsCount = %d, want 2", stats.SessionsCount)
+	}
+}

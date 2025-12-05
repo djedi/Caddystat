@@ -55,13 +55,16 @@ func main() {
 	// Print startup banner
 	printStartupBanner(cfg)
 
-	store, err := storage.New(cfg.DBPath)
+	store, err := storage.NewWithOptions(cfg.DBPath, storage.Options{
+		MaxConnections: cfg.DBMaxConnections,
+		QueryTimeout:   cfg.DBQueryTimeout,
+	})
 	if err != nil {
 		slog.Error("failed to initialize database", "error", err)
 		os.Exit(1)
 	}
 	defer store.Close()
-	slog.Debug("database initialized", "path", cfg.DBPath)
+	slog.Debug("database initialized", "path", cfg.DBPath, "max_connections", cfg.DBMaxConnections, "query_timeout", cfg.DBQueryTimeout)
 
 	geo, err := ingest.NewGeo(cfg.MaxMindDBPath)
 	if err != nil {
@@ -221,6 +224,12 @@ func printStartupBanner(cfg config.Config) {
 	}
 	if cfg.MaxRequestBodyBytes > 0 {
 		fmt.Printf("  Max Body Size:  %d bytes\n", cfg.MaxRequestBodyBytes)
+	}
+	if cfg.DBMaxConnections > 1 {
+		fmt.Printf("  DB Connections: %d\n", cfg.DBMaxConnections)
+	}
+	if cfg.DBQueryTimeout != 30*time.Second {
+		fmt.Printf("  Query Timeout:  %s\n", cfg.DBQueryTimeout)
 	}
 	fmt.Println()
 }
