@@ -431,7 +431,7 @@ func (s *Storage) SetSessionPermissions(ctx context.Context, sessionToken string
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Delete existing permissions for this session
 	_, err = tx.ExecContext(ctx, `DELETE FROM site_permissions WHERE session_token = ?`, sessionToken)

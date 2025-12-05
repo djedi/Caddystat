@@ -184,12 +184,11 @@ type ReportStore interface {
 
 // Manager handles report generation and scheduling.
 type Manager struct {
-	cfg      Config
-	stats    StatsProvider
-	store    ReportStore
-	mu       sync.RWMutex
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
+	cfg    Config
+	stats  StatsProvider
+	store  ReportStore
+	stopCh chan struct{}
+	wg     sync.WaitGroup
 }
 
 // NewManager creates a new report manager.

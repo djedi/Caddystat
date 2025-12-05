@@ -200,7 +200,7 @@ func TestGetSite(t *testing.T) {
 	srv.ServeHTTP(createW, createReq)
 
 	var createdSite storage.Site
-	json.NewDecoder(createW.Body).Decode(&createdSite)
+	_ = json.NewDecoder(createW.Body).Decode(&createdSite)
 
 	// Get the site
 	req := httptest.NewRequest(http.MethodGet, "/api/sites/"+itoa(createdSite.ID), nil)
@@ -277,7 +277,7 @@ func TestUpdateSite(t *testing.T) {
 	srv.ServeHTTP(createW, createReq)
 
 	var createdSite storage.Site
-	json.NewDecoder(createW.Body).Decode(&createdSite)
+	_ = json.NewDecoder(createW.Body).Decode(&createdSite)
 
 	// Update the site
 	updateBody := `{"display_name": "Updated Name", "retention_days": 14}`
@@ -334,7 +334,7 @@ func TestDeleteSite(t *testing.T) {
 	srv.ServeHTTP(createW, createReq)
 
 	var createdSite storage.Site
-	json.NewDecoder(createW.Body).Decode(&createdSite)
+	_ = json.NewDecoder(createW.Body).Decode(&createdSite)
 
 	// Delete the site
 	req := httptest.NewRequest(http.MethodDelete, "/api/sites/"+itoa(createdSite.ID), nil)

@@ -293,7 +293,7 @@ func TestStorage_ListSites(t *testing.T) {
 	// Add some request data
 	now := time.Now()
 	for i := 0; i < 5; i++ {
-		s.InsertRequest(ctx, RequestRecord{
+		_ = s.InsertRequest(ctx, RequestRecord{
 			Timestamp: now.Add(-time.Duration(i) * time.Hour),
 			Host:      "site1.com",
 			Path:      "/test",
@@ -303,7 +303,7 @@ func TestStorage_ListSites(t *testing.T) {
 		})
 	}
 	for i := 0; i < 3; i++ {
-		s.InsertRequest(ctx, RequestRecord{
+		_ = s.InsertRequest(ctx, RequestRecord{
 			Timestamp: now.Add(-time.Duration(i) * time.Hour),
 			Host:      "site2.com",
 			Path:      "/test",
@@ -358,7 +358,7 @@ func TestStorage_ListSites_IncludesUnconfiguredHosts(t *testing.T) {
 	// Add requests for a host that has no site configuration
 	now := time.Now()
 	for i := 0; i < 3; i++ {
-		s.InsertRequest(ctx, RequestRecord{
+		_ = s.InsertRequest(ctx, RequestRecord{
 			Timestamp: now.Add(-time.Duration(i) * time.Hour),
 			Host:      "unconfigured.com",
 			Path:      "/test",

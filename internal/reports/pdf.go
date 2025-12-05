@@ -159,17 +159,12 @@ func GeneratePDF(data *ReportData) ([]byte, error) {
 
 // pdfWriter is a simple PDF generator.
 type pdfWriter struct {
-	objects    []pdfObject
 	content    bytes.Buffer
 	yPos       float64
 	pageHeight float64
 	pageWidth  float64
 	margin     float64
 	fontSize   float64
-}
-
-type pdfObject struct {
-	data []byte
 }
 
 func newPDFWriter() *pdfWriter {
