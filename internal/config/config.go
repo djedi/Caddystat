@@ -31,6 +31,17 @@ type Config struct {
 	DBQueryTimeout          time.Duration
 	BotSignaturesPaths      []string // Comma-separated list of bot signature files (community lists)
 	SSEBufferSize           int      // Channel buffer size for SSE clients
+
+	// Report configuration
+	ReportsEnabled        bool
+	ReportsStoragePath    string        // Directory to store generated reports
+	ReportsRetentionDays  int           // How long to keep generated reports
+	ReportsCheckInterval  time.Duration // How often to check for due reports
+	ReportsSMTPHost       string
+	ReportsSMTPPort       int
+	ReportsSMTPUsername   string
+	ReportsSMTPPassword   string
+	ReportsSMTPFrom       string
 }
 
 func Load() Config {
@@ -55,6 +66,16 @@ func Load() Config {
 		DBQueryTimeout:          getEnvDuration("DB_QUERY_TIMEOUT", 30*time.Second),
 		BotSignaturesPaths:      splitEnv("BOT_SIGNATURES_PATH", nil),
 		SSEBufferSize:           getEnvInt("SSE_BUFFER_SIZE", 32),
+		// Report configuration
+		ReportsEnabled:       getEnvBool("REPORTS_ENABLED", false),
+		ReportsStoragePath:   getEnv("REPORTS_STORAGE_PATH", "./data/reports"),
+		ReportsRetentionDays: getEnvInt("REPORTS_RETENTION_DAYS", 90),
+		ReportsCheckInterval: getEnvDuration("REPORTS_CHECK_INTERVAL", 5*time.Minute),
+		ReportsSMTPHost:      os.Getenv("REPORTS_SMTP_HOST"),
+		ReportsSMTPPort:      getEnvInt("REPORTS_SMTP_PORT", 587),
+		ReportsSMTPUsername:  os.Getenv("REPORTS_SMTP_USERNAME"),
+		ReportsSMTPPassword:  os.Getenv("REPORTS_SMTP_PASSWORD"),
+		ReportsSMTPFrom:      getEnv("REPORTS_SMTP_FROM", "caddystat@localhost"),
 	}
 
 	return cfg
@@ -76,6 +97,11 @@ func getEnvInt64(key string, def int64) int64 {
 // AuthEnabled returns true if both AUTH_USERNAME and AUTH_PASSWORD are set.
 func (c Config) AuthEnabled() bool {
 	return c.AuthUsername != "" && c.AuthPassword != ""
+}
+
+// ReportsEmailEnabled returns true if SMTP is configured for reports.
+func (c Config) ReportsEmailEnabled() bool {
+	return c.ReportsSMTPHost != ""
 }
 
 func splitEnv(key string, def []string) []string {

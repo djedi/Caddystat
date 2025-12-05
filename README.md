@@ -31,10 +31,10 @@ All configuration is done via environment variables:
 
 ### Data Retention
 
-| Variable              | Default | Description                        |
-| --------------------- | ------- | ---------------------------------- |
-| `DATA_RETENTION_DAYS` | `7`     | Purge raw rows older than N days   |
-| `RAW_RETENTION_HOURS` | `48`    | Window used for realtime summaries |
+| Variable              | Default | Description                                                                  |
+| --------------------- | ------- | ---------------------------------------------------------------------------- |
+| `DATA_RETENTION_DAYS` | `7`     | Default retention for raw rows. Sites can override via `/api/sites` endpoint |
+| `RAW_RETENTION_HOURS` | `48`    | Window used for realtime summaries                                           |
 
 ### GeoIP
 
@@ -58,6 +58,8 @@ All configuration is done via environment variables:
 | `AUTH_PASSWORD` | _(empty)_ | Password for dashboard authentication |
 
 Both `AUTH_USERNAME` and `AUTH_PASSWORD` must be set to enable authentication.
+
+**Site-specific Access:** When logging in via the API, you can restrict a session to specific sites by passing `allowed_sites` in the login request body. See the API section for details.
 
 ### Logging
 
@@ -117,6 +119,79 @@ This allows you to:
 - Override default bot classifications
 - Add organization-specific bot signatures
 - Keep bot lists organized by category
+
+### Alerting
+
+Caddystat includes an alerting system that can notify you via email or webhook when certain conditions are met.
+
+| Variable                  | Default   | Description                               |
+| ------------------------- | --------- | ----------------------------------------- |
+| `ALERT_ENABLED`           | `false`   | Enable the alerting system                |
+| `ALERT_EVALUATE_INTERVAL` | `1m`      | How often to check alert rules            |
+| `ALERT_RULES_PATH`        | _(empty)_ | Path to JSON file with custom alert rules |
+
+#### Error Rate Alert
+
+Triggers when 5xx error rate exceeds a threshold.
+
+| Variable                     | Default    | Description                                  |
+| ---------------------------- | ---------- | -------------------------------------------- |
+| `ALERT_ERROR_RATE_THRESHOLD` | _(empty)_  | Error rate percentage to trigger (e.g., `5`) |
+| `ALERT_ERROR_RATE_DURATION`  | `5m`       | Evaluation window                            |
+| `ALERT_ERROR_RATE_COOLDOWN`  | `15m`      | Minimum time between alerts                  |
+| `ALERT_ERROR_RATE_SEVERITY`  | `critical` | Severity: `info`, `warning`, `critical`      |
+
+#### Traffic Spike Alert
+
+Triggers when traffic increases suddenly.
+
+| Variable                        | Default   | Description                                 |
+| ------------------------------- | --------- | ------------------------------------------- |
+| `ALERT_TRAFFIC_SPIKE_THRESHOLD` | _(empty)_ | Percentage increase to trigger (e.g., `50`) |
+| `ALERT_TRAFFIC_SPIKE_DURATION`  | `5m`      | Evaluation window                           |
+| `ALERT_TRAFFIC_SPIKE_COOLDOWN`  | `15m`     | Minimum time between alerts                 |
+| `ALERT_TRAFFIC_SPIKE_SEVERITY`  | `warning` | Severity level                              |
+
+#### Traffic Drop Alert
+
+Triggers when traffic drops suddenly.
+
+| Variable                       | Default   | Description                                 |
+| ------------------------------ | --------- | ------------------------------------------- |
+| `ALERT_TRAFFIC_DROP_THRESHOLD` | _(empty)_ | Percentage decrease to trigger (e.g., `50`) |
+| `ALERT_TRAFFIC_DROP_DURATION`  | `5m`      | Evaluation window                           |
+| `ALERT_TRAFFIC_DROP_COOLDOWN`  | `15m`     | Minimum time between alerts                 |
+| `ALERT_TRAFFIC_DROP_SEVERITY`  | `warning` | Severity level                              |
+
+#### 404 Threshold Alert
+
+Triggers when 404 count exceeds a threshold.
+
+| Variable              | Default   | Description                 |
+| --------------------- | --------- | --------------------------- |
+| `ALERT_404_THRESHOLD` | _(empty)_ | Count threshold to trigger  |
+| `ALERT_404_DURATION`  | `5m`      | Evaluation window           |
+| `ALERT_404_COOLDOWN`  | `15m`     | Minimum time between alerts |
+| `ALERT_404_SEVERITY`  | `warning` | Severity level              |
+
+#### Email Notifications
+
+| Variable              | Default               | Description                         |
+| --------------------- | --------------------- | ----------------------------------- |
+| `ALERT_SMTP_HOST`     | _(empty)_             | SMTP server (enables email alerts)  |
+| `ALERT_SMTP_PORT`     | `587`                 | SMTP port                           |
+| `ALERT_SMTP_USERNAME` | _(empty)_             | SMTP username                       |
+| `ALERT_SMTP_PASSWORD` | _(empty)_             | SMTP password                       |
+| `ALERT_SMTP_FROM`     | `caddystat@localhost` | Sender email address                |
+| `ALERT_EMAIL_TO`      | _(empty)_             | Comma-separated recipient addresses |
+
+#### Webhook Notifications
+
+| Variable                | Default   | Description                               |
+| ----------------------- | --------- | ----------------------------------------- |
+| `ALERT_WEBHOOK_URL`     | _(empty)_ | Webhook URL (enables webhook alerts)      |
+| `ALERT_WEBHOOK_METHOD`  | `POST`    | HTTP method: `POST` or `GET`              |
+| `ALERT_WEBHOOK_HEADERS` | _(empty)_ | Custom headers: `Key1:Value1,Key2:Value2` |
 
 ### Advanced
 
@@ -267,13 +342,66 @@ npm run build   # outputs to web/_site
 
 The Go server serves `web/_site` at `/`.
 
-## API (MVP)
+## API
 
-- `GET /api/stats/summary?range=24h` – totals, statuses, bandwidth, top paths/hosts, unique visitors, avg latency.
+### Stats Endpoints
+
+- `GET /api/stats/summary?range=24h&host=` – totals, statuses, bandwidth, top paths/hosts, unique visitors, avg latency.
 - `GET /api/stats/requests?range=24h` – hourly buckets.
 - `GET /api/stats/geo?range=24h` – country/region/city counts (empty if GeoLite not configured).
 - `GET /api/stats/bandwidth?range=24h&limit=10` – bandwidth statistics per host, path, and content type.
-- `GET /api/sse` – server-sent events with live summary snapshots.
+- `GET /api/stats/performance?range=24h&host=` – response time percentiles and slow pages.
+- `GET /api/stats/sessions?range=24h&host=&limit=50` – visitor session reconstruction.
+- `GET /api/stats/browsers` – browser usage stats.
+- `GET /api/stats/os` – OS usage stats.
+- `GET /api/stats/robots` – bot/spider stats.
+- `GET /api/stats/referrers` – referrer stats.
+- `GET /api/stats/hosts` – top hosts by request count.
+- `GET /api/stats/monthly?months=12` – monthly history.
+- `GET /api/stats/daily` – current month daily breakdown.
+- `GET /api/stats/recent?limit=20` – recent individual requests.
+- `GET /api/stats/status` – system status (DB size, row counts).
+- `GET /api/sse?host=&range=24h` – server-sent events for live updates.
+
+### Site Management
+
+- `GET /api/sites` – list all sites (configured + discovered from logs).
+- `POST /api/sites` – create a site configuration.
+- `GET /api/sites/{id}` – get a specific site.
+- `PUT /api/sites/{id}` – update a site configuration.
+- `DELETE /api/sites/{id}` – delete a site configuration.
+
+Site configuration body:
+
+```json
+{
+  "host": "example.com",
+  "display_name": "Example Site",
+  "retention_days": 30,
+  "enabled": true
+}
+```
+
+### Authentication
+
+- `GET /api/auth/check` – check authentication status (returns permissions if authenticated).
+- `POST /api/auth/login` – login with username/password.
+- `POST /api/auth/logout` – logout and clear session.
+
+Login request body:
+
+```json
+{
+  "username": "admin",
+  "password": "secret",
+  "allowed_sites": ["site1.com", "site2.com"]
+}
+```
+
+The `allowed_sites` field is optional. If omitted, the session has access to all sites. If provided, access is restricted to only those hosts.
+
+### System
+
 - `GET /metrics` – Prometheus metrics endpoint.
 - `GET /health` – health check endpoint (returns DB status and version).
 

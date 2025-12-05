@@ -41,7 +41,7 @@ cd web && npm run dev
 - `LOG_PATH` - Comma-separated Caddy log paths (default: `./caddy.log`)
 - `LISTEN_ADDR` - HTTP bind address (default: `:8404`)
 - `DB_PATH` - SQLite database path (default: `./data/caddystat.db`)
-- `DATA_RETENTION_DAYS` - Purge raw rows older than N days (default: `7`)
+- `DATA_RETENTION_DAYS` - Default purge window for raw rows (default: `7`). Sites can override this with per-site retention policies via the `/api/sites` endpoint.
 - `RAW_RETENTION_HOURS` - Window for realtime summaries (default: `48`)
 - `MAXMIND_DB_PATH` - Optional path to GeoLite2-City.mmdb for geo lookups
 - `AUTH_USERNAME` - Optional username for dashboard authentication
@@ -53,11 +53,55 @@ cd web && npm run dev
 - `BOT_SIGNATURES_PATH` - Comma-separated list of bot signature JSON files (community lists merged with defaults, see `bots.json` for format)
 - `SSE_BUFFER_SIZE` - Channel buffer size for SSE clients (default: `32`)
 
+### Alerting Configuration
+
+- `ALERT_ENABLED` - Enable alerting system (default: `false`)
+- `ALERT_EVALUATE_INTERVAL` - How often to check alert rules (default: `1m`)
+- `ALERT_RULES_PATH` - Path to JSON file with alert rules (optional)
+
+#### Error Rate Alert
+- `ALERT_ERROR_RATE_THRESHOLD` - Trigger when 5xx rate exceeds this percentage (e.g., `5` for 5%)
+- `ALERT_ERROR_RATE_DURATION` - Evaluation window (default: `5m`)
+- `ALERT_ERROR_RATE_COOLDOWN` - Min time between alerts (default: `15m`)
+- `ALERT_ERROR_RATE_SEVERITY` - Alert severity: `info`, `warning`, `critical` (default: `critical`)
+
+#### Traffic Spike Alert
+- `ALERT_TRAFFIC_SPIKE_THRESHOLD` - Trigger when traffic increases by this percentage (e.g., `50` for 50%)
+- `ALERT_TRAFFIC_SPIKE_DURATION` - Evaluation window (default: `5m`)
+- `ALERT_TRAFFIC_SPIKE_COOLDOWN` - Min time between alerts (default: `15m`)
+- `ALERT_TRAFFIC_SPIKE_SEVERITY` - Alert severity (default: `warning`)
+
+#### Traffic Drop Alert
+- `ALERT_TRAFFIC_DROP_THRESHOLD` - Trigger when traffic drops by this percentage (e.g., `50` for 50%)
+- `ALERT_TRAFFIC_DROP_DURATION` - Evaluation window (default: `5m`)
+- `ALERT_TRAFFIC_DROP_COOLDOWN` - Min time between alerts (default: `15m`)
+- `ALERT_TRAFFIC_DROP_SEVERITY` - Alert severity (default: `warning`)
+
+#### 404 Threshold Alert
+- `ALERT_404_THRESHOLD` - Trigger when 404 count exceeds this number
+- `ALERT_404_DURATION` - Evaluation window (default: `5m`)
+- `ALERT_404_COOLDOWN` - Min time between alerts (default: `15m`)
+- `ALERT_404_SEVERITY` - Alert severity (default: `warning`)
+
+#### Email Channel
+- `ALERT_SMTP_HOST` - SMTP server hostname (enables email notifications)
+- `ALERT_SMTP_PORT` - SMTP port (default: `587`)
+- `ALERT_SMTP_USERNAME` - SMTP username for authentication
+- `ALERT_SMTP_PASSWORD` - SMTP password for authentication
+- `ALERT_SMTP_FROM` - Sender email address (default: `caddystat@localhost`)
+- `ALERT_EMAIL_TO` - Comma-separated list of recipient email addresses
+
+#### Webhook Channel
+- `ALERT_WEBHOOK_URL` - Webhook URL (enables webhook notifications)
+- `ALERT_WEBHOOK_METHOD` - HTTP method: `POST` or `GET` (default: `POST`)
+- `ALERT_WEBHOOK_HEADERS` - Custom headers in format `Key1:Value1,Key2:Value2`
+
 ## Architecture
 
 ```
 cmd/caddystat/main.go     Entry point, wires up components
 internal/
+├── alerts/               Alerting framework (email, webhook notifications)
 ├── config/               Environment-based configuration
 ├── ingest/               Log file tailing and parsing (supports gzip)
 ├── storage/              SQLite storage with hourly/daily rollups
@@ -99,8 +143,8 @@ web/                      Frontend (Alpine.js + Tailwind, built with PostCSS)
 - `GET /api/stats/daily` - Current month daily breakdown
 - `GET /api/stats/recent?limit=20` - Recent individual requests
 - `GET /api/sse?host=&range=24h` - SSE stream for live updates
-- `GET /api/auth/check` - Check authentication status
-- `POST /api/auth/login` - Login with username/password
+- `GET /api/auth/check` - Check authentication status (returns permissions if authenticated)
+- `POST /api/auth/login` - Login with username/password (optional: `allowed_sites` array for site-specific access)
 - `POST /api/auth/logout` - Logout and clear session
 - `GET /api/export/csv?range=24h&host=` - Export requests as CSV
 - `GET /api/export/json?range=24h&host=` - Export requests as JSON

@@ -58,28 +58,29 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/auth/logout", s.requireCSRF(s.handleLogout))
 	s.mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 
-	// Protected API endpoints
-	s.mux.HandleFunc("/api/stats/summary", s.requireAuth(s.handleSummary))
-	s.mux.HandleFunc("/api/stats/monthly", s.requireAuth(s.handleMonthly))
-	s.mux.HandleFunc("/api/stats/daily", s.requireAuth(s.handleDaily))
-	s.mux.HandleFunc("/api/stats/requests", s.requireAuth(s.handleRequests))
-	s.mux.HandleFunc("/api/stats/geo", s.requireAuth(s.handleGeo))
-	s.mux.HandleFunc("/api/stats/hosts", s.requireAuth(s.handleVisitors))
-	s.mux.HandleFunc("/api/stats/browsers", s.requireAuth(s.handleBrowsers))
-	s.mux.HandleFunc("/api/stats/os", s.requireAuth(s.handleOS))
-	s.mux.HandleFunc("/api/stats/robots", s.requireAuth(s.handleRobots))
-	s.mux.HandleFunc("/api/stats/referrers", s.requireAuth(s.handleReferrers))
-	s.mux.HandleFunc("/api/stats/recent", s.requireAuth(s.handleRecentRequests))
-	s.mux.HandleFunc("/api/stats/status", s.requireAuth(s.handleStatus))
-	s.mux.HandleFunc("/api/stats/performance", s.requireAuth(s.handlePerformance))
-	s.mux.HandleFunc("/api/stats/bandwidth", s.requireAuth(s.handleBandwidth))
-	s.mux.HandleFunc("/api/stats/sessions", s.requireAuth(s.handleSessions))
-	s.mux.HandleFunc("/api/sse", s.requireAuth(s.handleSSE))
+	// Protected API endpoints with site permission checks
+	// These endpoints accept a "host" query parameter that must be authorized
+	s.mux.HandleFunc("/api/stats/summary", s.requireAuth(s.requireSitePermission(s.handleSummary)))
+	s.mux.HandleFunc("/api/stats/monthly", s.requireAuth(s.requireSitePermission(s.handleMonthly)))
+	s.mux.HandleFunc("/api/stats/daily", s.requireAuth(s.requireSitePermission(s.handleDaily)))
+	s.mux.HandleFunc("/api/stats/requests", s.requireAuth(s.requireSitePermission(s.handleRequests)))
+	s.mux.HandleFunc("/api/stats/geo", s.requireAuth(s.requireSitePermission(s.handleGeo)))
+	s.mux.HandleFunc("/api/stats/hosts", s.requireAuth(s.requireSitePermission(s.handleVisitors)))
+	s.mux.HandleFunc("/api/stats/browsers", s.requireAuth(s.requireSitePermission(s.handleBrowsers)))
+	s.mux.HandleFunc("/api/stats/os", s.requireAuth(s.requireSitePermission(s.handleOS)))
+	s.mux.HandleFunc("/api/stats/robots", s.requireAuth(s.requireSitePermission(s.handleRobots)))
+	s.mux.HandleFunc("/api/stats/referrers", s.requireAuth(s.requireSitePermission(s.handleReferrers)))
+	s.mux.HandleFunc("/api/stats/recent", s.requireAuth(s.requireSitePermission(s.handleRecentRequests)))
+	s.mux.HandleFunc("/api/stats/status", s.requireAuth(s.handleStatus)) // Status doesn't filter by host
+	s.mux.HandleFunc("/api/stats/performance", s.requireAuth(s.requireSitePermission(s.handlePerformance)))
+	s.mux.HandleFunc("/api/stats/bandwidth", s.requireAuth(s.requireSitePermission(s.handleBandwidth)))
+	s.mux.HandleFunc("/api/stats/sessions", s.requireAuth(s.requireSitePermission(s.handleSessions)))
+	s.mux.HandleFunc("/api/sse", s.requireAuth(s.requireSitePermission(s.handleSSE)))
 
-	// Export endpoints
-	s.mux.HandleFunc("/api/export/csv", s.requireAuth(s.handleExportCSV))
-	s.mux.HandleFunc("/api/export/json", s.requireAuth(s.handleExportJSON))
-	s.mux.HandleFunc("/api/export/backup", s.requireAuth(s.handleExportBackup))
+	// Export endpoints with site permission checks
+	s.mux.HandleFunc("/api/export/csv", s.requireAuth(s.requireSitePermission(s.handleExportCSV)))
+	s.mux.HandleFunc("/api/export/json", s.requireAuth(s.requireSitePermission(s.handleExportJSON)))
+	s.mux.HandleFunc("/api/export/backup", s.requireAuth(s.handleExportBackup)) // Backup is system-wide, admin only
 
 	// Site management endpoints
 	s.mux.HandleFunc("/api/sites", s.requireAuth(s.requireCSRF(s.handleSites)))
@@ -273,6 +274,49 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// requireSitePermission wraps a handler to check if the session has permission to access
+// the requested site (determined by the "host" query parameter).
+// If no host is specified, it allows access (aggregate view).
+func (s *Server) requireSitePermission(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// If auth is not enabled, pass through
+		if !s.cfg.AuthEnabled() {
+			next(w, r)
+			return
+		}
+
+		host := r.URL.Query().Get("host")
+		// If no specific host is requested, allow access (aggregate view)
+		// The underlying handlers may need to filter results based on permissions
+		if host == "" {
+			next(w, r)
+			return
+		}
+
+		// Get session cookie
+		cookie, err := r.Cookie(sessionCookieName)
+		if err != nil {
+			writeErrorWithCode(w, http.StatusUnauthorized, "unauthorized", "UNAUTHORIZED")
+			return
+		}
+
+		// Check site permission
+		hasPermission, err := s.store.HasSitePermission(r.Context(), cookie.Value, host)
+		if err != nil {
+			slog.Warn("failed to check site permission", "error", err)
+			writeInternalError(w, err, "check site permission")
+			return
+		}
+
+		if !hasPermission {
+			writeErrorWithCode(w, http.StatusForbidden, "access denied for this site", "SITE_ACCESS_DENIED")
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
@@ -286,8 +330,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username     string   `json:"username"`
+		Password     string   `json:"password"`
+		AllowedSites []string `json:"allowed_sites,omitempty"` // Optional: restrict session to specific sites
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErrorWithCode(w, http.StatusBadRequest, "invalid request body", "INVALID_REQUEST")
@@ -307,6 +352,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeInternalError(w, err, "create session")
 		return
+	}
+
+	// Set site permissions for the session
+	if err := s.store.SetSessionPermissions(r.Context(), token, req.AllowedSites); err != nil {
+		slog.Warn("failed to set session permissions", "error", err)
+		// Continue anyway - session will have all-site access by default
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -329,6 +380,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil {
+		// Delete permissions first, then session
+		if err := s.store.DeleteSessionPermissions(r.Context(), cookie.Value); err != nil {
+			slog.Warn("failed to delete session permissions", "error", err)
+		}
 		s.deleteSession(r.Context(), cookie.Value)
 	}
 
@@ -358,7 +413,23 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]any{"authenticated": true, "auth_required": true})
+	// Get session permissions
+	perms, err := s.store.GetSessionPermissions(r.Context(), cookie.Value)
+	if err != nil {
+		slog.Warn("failed to get session permissions", "error", err)
+		// Return basic auth info without permissions on error
+		writeJSON(w, map[string]any{"authenticated": true, "auth_required": true})
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"authenticated": true,
+		"auth_required": true,
+		"permissions": map[string]any{
+			"all_sites":     perms.AllSites,
+			"allowed_hosts": perms.AllowedHosts,
+		},
+	})
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {

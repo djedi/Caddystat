@@ -482,3 +482,261 @@ func TestStorage_IsSiteEnabled(t *testing.T) {
 		t.Error("IsSiteEnabled() = false, want true for unconfigured site")
 	}
 }
+
+func TestStorage_SetSessionPermissions_AllSites(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session first
+	token := "test-token-all"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Set permissions with no hosts (should grant all sites)
+	if err := s.SetSessionPermissions(ctx, token, nil); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Verify permissions
+	perms, err := s.GetSessionPermissions(ctx, token)
+	if err != nil {
+		t.Fatalf("GetSessionPermissions() error = %v", err)
+	}
+	if !perms.AllSites {
+		t.Error("SetSessionPermissions() with nil hosts should grant AllSites")
+	}
+	if len(perms.AllowedHosts) != 0 {
+		t.Errorf("SetSessionPermissions() AllowedHosts = %v, want empty", perms.AllowedHosts)
+	}
+}
+
+func TestStorage_SetSessionPermissions_SpecificHosts(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session first
+	token := "test-token-specific"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Set permissions for specific hosts
+	hosts := []string{"site1.com", "site2.com"}
+	if err := s.SetSessionPermissions(ctx, token, hosts); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Verify permissions
+	perms, err := s.GetSessionPermissions(ctx, token)
+	if err != nil {
+		t.Fatalf("GetSessionPermissions() error = %v", err)
+	}
+	if perms.AllSites {
+		t.Error("SetSessionPermissions() with specific hosts should not grant AllSites")
+	}
+	if len(perms.AllowedHosts) != 2 {
+		t.Errorf("SetSessionPermissions() AllowedHosts len = %d, want 2", len(perms.AllowedHosts))
+	}
+
+	// Check the hosts
+	hostSet := make(map[string]bool)
+	for _, h := range perms.AllowedHosts {
+		hostSet[h] = true
+	}
+	if !hostSet["site1.com"] {
+		t.Error("SetSessionPermissions() should include site1.com")
+	}
+	if !hostSet["site2.com"] {
+		t.Error("SetSessionPermissions() should include site2.com")
+	}
+}
+
+func TestStorage_SetSessionPermissions_ReplaceExisting(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session
+	token := "test-token-replace"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Set initial permissions
+	if err := s.SetSessionPermissions(ctx, token, []string{"site1.com", "site2.com"}); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Replace with new permissions
+	if err := s.SetSessionPermissions(ctx, token, []string{"site3.com"}); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Verify only new permissions exist
+	perms, err := s.GetSessionPermissions(ctx, token)
+	if err != nil {
+		t.Fatalf("GetSessionPermissions() error = %v", err)
+	}
+	if len(perms.AllowedHosts) != 1 {
+		t.Errorf("SetSessionPermissions() should replace existing, got %d hosts", len(perms.AllowedHosts))
+	}
+	if perms.AllowedHosts[0] != "site3.com" {
+		t.Errorf("SetSessionPermissions() AllowedHosts[0] = %q, want site3.com", perms.AllowedHosts[0])
+	}
+}
+
+func TestStorage_HasSitePermission_AllSites(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session with all sites permission
+	token := "test-token-has-all"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := s.SetSessionPermissions(ctx, token, nil); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Check permission for any host
+	has, err := s.HasSitePermission(ctx, token, "any-site.com")
+	if err != nil {
+		t.Fatalf("HasSitePermission() error = %v", err)
+	}
+	if !has {
+		t.Error("HasSitePermission() should return true for any host when AllSites is granted")
+	}
+}
+
+func TestStorage_HasSitePermission_SpecificHosts(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session with specific hosts
+	token := "test-token-has-specific"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := s.SetSessionPermissions(ctx, token, []string{"allowed.com", "also-allowed.com"}); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Test allowed host
+	has, err := s.HasSitePermission(ctx, token, "allowed.com")
+	if err != nil {
+		t.Fatalf("HasSitePermission() error = %v", err)
+	}
+	if !has {
+		t.Error("HasSitePermission() should return true for allowed host")
+	}
+
+	// Test case-insensitive match
+	has, err = s.HasSitePermission(ctx, token, "Allowed.Com")
+	if err != nil {
+		t.Fatalf("HasSitePermission() error = %v", err)
+	}
+	if !has {
+		t.Error("HasSitePermission() should match hosts case-insensitively")
+	}
+
+	// Test not allowed host
+	has, err = s.HasSitePermission(ctx, token, "not-allowed.com")
+	if err != nil {
+		t.Fatalf("HasSitePermission() error = %v", err)
+	}
+	if has {
+		t.Error("HasSitePermission() should return false for non-allowed host")
+	}
+}
+
+func TestStorage_GetSessionPermissions_NoPermissions(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session without setting permissions
+	token := "test-token-no-perms"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	// Get permissions - should default to all sites for backward compatibility
+	perms, err := s.GetSessionPermissions(ctx, token)
+	if err != nil {
+		t.Fatalf("GetSessionPermissions() error = %v", err)
+	}
+	if !perms.AllSites {
+		t.Error("GetSessionPermissions() should default to AllSites for sessions without explicit permissions")
+	}
+}
+
+func TestStorage_DeleteSessionPermissions(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session and set permissions
+	token := "test-token-delete"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := s.SetSessionPermissions(ctx, token, []string{"site1.com"}); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Delete permissions
+	if err := s.DeleteSessionPermissions(ctx, token); err != nil {
+		t.Fatalf("DeleteSessionPermissions() error = %v", err)
+	}
+
+	// Verify permissions were deleted (should now default to AllSites)
+	perms, err := s.GetSessionPermissions(ctx, token)
+	if err != nil {
+		t.Fatalf("GetSessionPermissions() error = %v", err)
+	}
+	if !perms.AllSites {
+		t.Error("After DeleteSessionPermissions(), should default to AllSites")
+	}
+}
+
+func TestStorage_CleanupOrphanedPermissions(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session and set permissions
+	token := "test-token-orphan"
+	if err := s.CreateSession(ctx, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := s.SetSessionPermissions(ctx, token, []string{"site1.com"}); err != nil {
+		t.Fatalf("SetSessionPermissions() error = %v", err)
+	}
+
+	// Delete the session (but not permissions)
+	if err := s.DeleteSession(ctx, token); err != nil {
+		t.Fatalf("DeleteSession() error = %v", err)
+	}
+
+	// Cleanup orphaned permissions
+	deleted, err := s.CleanupOrphanedPermissions(ctx)
+	if err != nil {
+		t.Fatalf("CleanupOrphanedPermissions() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("CleanupOrphanedPermissions() deleted = %d, want 1", deleted)
+	}
+}

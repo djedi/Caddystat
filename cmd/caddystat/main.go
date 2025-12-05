@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dustin/Caddystat/internal/alerts"
 	"github.com/dustin/Caddystat/internal/config"
 	"github.com/dustin/Caddystat/internal/ingest"
 	"github.com/dustin/Caddystat/internal/logging"
@@ -60,8 +61,11 @@ func main() {
 		}
 	}
 
+	// Load alerting configuration
+	alertCfg := alerts.LoadConfig()
+
 	// Print startup banner
-	printStartupBanner(cfg)
+	printStartupBanner(cfg, alertCfg)
 
 	store, err := storage.NewWithOptions(cfg.DBPath, storage.Options{
 		MaxConnections: cfg.DBMaxConnections,
@@ -139,12 +143,24 @@ func main() {
 
 	ingestor := ingest.New(cfg, store, hub, geo, m)
 
+	// Initialize alerting system
+	var alertManager *alerts.Manager
+	if alertCfg.Enabled {
+		alertStatsAdapter := storage.NewAlertStatsAdapter(store)
+		alertManager = alerts.NewManager(alertCfg, alertStatsAdapter)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	if err := ingestor.Start(ctx); err != nil {
 		slog.Error("failed to start ingestor", "error", err)
 		os.Exit(1)
+	}
+
+	// Start alerting if enabled
+	if alertManager != nil {
+		alertManager.Start(ctx)
 	}
 
 	go func() {
@@ -157,10 +173,23 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-dataTicker.C:
-				slog.Debug("running data cleanup", "retention_days", cfg.DataRetentionDays)
-				if err := store.Cleanup(context.Background(), cfg.DataRetentionDays); err != nil {
+				slog.Debug("running data cleanup", "default_retention_days", cfg.DataRetentionDays)
+				result, err := store.CleanupWithPerSiteRetention(context.Background(), cfg.DataRetentionDays)
+				if err != nil {
 					slog.Warn("data cleanup failed", "error", err)
 				} else {
+					if result.TotalDeleted > 0 {
+						slog.Info("data cleanup completed",
+							"total_deleted", result.TotalDeleted,
+							"global_deleted", result.GlobalDeleted,
+							"sites_with_custom_retention", result.SitesProcessed,
+						)
+						for host, deleted := range result.PerSiteDeleted {
+							slog.Debug("per-site cleanup", "host", host, "deleted", deleted)
+						}
+					} else {
+						slog.Debug("data cleanup completed", "total_deleted", 0)
+					}
 					// Run VACUUM after cleanup to reclaim disk space
 					slog.Debug("running database vacuum")
 					if bytesFreed, err := store.Vacuum(context.Background()); err != nil {
@@ -213,11 +242,17 @@ func main() {
 		slog.Debug("HTTP server stopped")
 	}
 
-	// 3. Stop log tailing goroutines
+	// 3. Stop alerting system
+	if alertManager != nil {
+		alertManager.Stop()
+		slog.Debug("stopped alerting")
+	}
+
+	// 4. Stop log tailing goroutines
 	ingestor.Stop()
 	slog.Debug("stopped log tailers")
 
-	// 4. Close GeoIP database if configured
+	// 5. Close GeoIP database if configured
 	if geo != nil {
 		if err := geo.Close(); err != nil {
 			slog.Warn("failed to close GeoIP database", "error", err)
@@ -226,12 +261,12 @@ func main() {
 		}
 	}
 
-	// 5. Database is closed via defer store.Close() above
+	// 6. Database is closed via defer store.Close() above
 
 	slog.Info("shutdown complete")
 }
 
-func printStartupBanner(cfg config.Config) {
+func printStartupBanner(cfg config.Config, alertCfg alerts.Config) {
 	fmt.Println()
 	fmt.Println("  ╔═══════════════════════════════════════════════╗")
 	fmt.Println("  ║              Caddystat                        ║")
@@ -271,6 +306,9 @@ func printStartupBanner(cfg config.Config) {
 	}
 	if len(cfg.BotSignaturesPaths) > 0 {
 		fmt.Printf("  Bot Signatures: %s\n", strings.Join(cfg.BotSignaturesPaths, ", "))
+	}
+	if alertCfg.Enabled {
+		fmt.Printf("  Alerting:       enabled (%d rules, %d channels)\n", len(alertCfg.Rules), len(alertCfg.Channels))
 	}
 	fmt.Println()
 }

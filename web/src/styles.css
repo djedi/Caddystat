@@ -914,6 +914,32 @@ body,
 }
 
 /* ============================================
+   CHART.JS CONTAINERS
+   ============================================ */
+
+.chart-container {
+  position: relative;
+  height: 200px;
+  margin-bottom: var(--space-lg);
+}
+
+.chart-donut-container {
+  position: relative;
+  height: 180px;
+  margin-bottom: var(--space-lg);
+}
+
+@media (min-width: 768px) {
+  .chart-container {
+    height: 250px;
+  }
+
+  .chart-donut-container {
+    height: 200px;
+  }
+}
+
+/* ============================================
    UTILITY CLASSES
    ============================================ */
 

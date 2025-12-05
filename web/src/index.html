@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/bundle.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   </head>
   <body class="page-bg">
@@ -218,18 +219,13 @@
 
         <!-- Monthly History -->
         <template x-if="activeView === 'archive' && viewMode === 'month'">
-          <section class="panel">
+          <section class="panel" x-init="$watch('monthlyHistory', () => renderMonthlyChart())">
             <div class="panel-header">
               <h2 class="panel-title">Monthly Trend</h2>
               <span class="panel-subtitle">Last 12 months</span>
             </div>
-            <div class="bar-chart">
-              <template x-for="m in monthlyHistory.months" :key="m.month_start">
-                <div class="bar-col">
-                  <div class="bar-fill" :style="`height:${barHeight(m.hits)}`" :title="`${formatNumber(m.hits)} hits`"></div>
-                  <div class="bar-label" x-text="formatMonth(m.month_start)"></div>
-                </div>
-              </template>
+            <div class="chart-container">
+              <canvas id="monthlyChart"></canvas>
             </div>
             <div class="table-wrapper">
               <table class="data-table">
@@ -272,18 +268,13 @@
 
         <!-- Daily History -->
         <template x-if="activeView === 'archive' && viewMode === 'month'">
-          <section class="panel">
+          <section class="panel" x-init="$watch('dailyHistory', () => renderDailyChart())">
             <div class="panel-header">
               <h2 class="panel-title">Daily Breakdown</h2>
               <span class="panel-subtitle">Current month</span>
             </div>
-            <div class="bar-chart compact">
-              <template x-for="d in dailyHistory.days" :key="d.date">
-                <div class="bar-col narrow">
-                  <div class="bar-fill alt" :style="`height:${barHeightDaily(d.hits)}`" :title="`${formatNumber(d.hits)} hits`"></div>
-                  <div class="bar-label" x-text="new Date(d.date).getUTCDate().toString().padStart(2,'0')"></div>
-                </div>
-              </template>
+            <div class="chart-container">
+              <canvas id="dailyChart"></canvas>
             </div>
             <div class="table-wrapper">
               <table class="data-table">
@@ -350,6 +341,77 @@
             <div class="metric-card">
               <p class="metric-label" x-text="`Visitors (${rangeShortLabel()})`"></p>
               <p class="metric-value" x-text="formatNumber(summary?.unique_visitors) || '-'"></p>
+            </div>
+          </section>
+        </template>
+
+        <!-- Sites Overview (shown when All hosts selected) -->
+        <template x-if="activeView === 'live' && !selectedHost && siteSummary && siteSummary.sites && siteSummary.sites.length > 1">
+          <section class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Sites Overview</h2>
+              <span class="panel-subtitle" x-text="`${siteSummary.enabled_sites} of ${siteSummary.total_sites} sites active (24h)`"></span>
+            </div>
+            <div class="metrics-grid" style="margin-bottom: 1rem;">
+              <div class="metric-card">
+                <p class="metric-label">Total Sites</p>
+                <p class="metric-value" x-text="siteSummary.total_sites"></p>
+              </div>
+              <div class="metric-card">
+                <p class="metric-label">Total Requests (24h)</p>
+                <p class="metric-value" x-text="formatNumber(siteSummary.total_requests)"></p>
+              </div>
+              <div class="metric-card">
+                <p class="metric-label">Total Bandwidth (24h)</p>
+                <p class="metric-value" x-text="formatBytes(siteSummary.total_bandwidth_bytes)"></p>
+              </div>
+              <div class="metric-card">
+                <p class="metric-label">Avg per Site (24h)</p>
+                <p class="metric-value" x-text="siteSummary.total_sites > 0 ? formatNumber(Math.round(siteSummary.total_requests / siteSummary.total_sites)) : '-'"></p>
+              </div>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Site</th>
+                    <th>Requests (24h)</th>
+                    <th>Visitors (24h)</th>
+                    <th>Bandwidth (24h)</th>
+                    <th>Last Request</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="site in siteSummary.sites.sort((a, b) => b.request_count - a.request_count)" :key="site.host">
+                    <tr @click="selectedHost = site.host; onHostChange();" style="cursor: pointer;" class="request-row">
+                      <td class="table-strong">
+                        <span x-text="site.display_name || site.host"></span>
+                        <template x-if="site.display_name && site.display_name !== site.host">
+                          <span class="muted" style="font-size: 0.75rem; margin-left: 0.5rem;" x-text="site.host"></span>
+                        </template>
+                      </td>
+                      <td class="table-mono" x-text="formatNumber(site.request_count)"></td>
+                      <td class="table-mono" x-text="formatNumber(site.unique_visitors_24h)"></td>
+                      <td class="table-mono" x-text="formatBytes(site.bandwidth_bytes)"></td>
+                      <td class="table-mono" x-text="site.last_request_at ? formatDateTime(site.last_request_at) : '-'"></td>
+                      <td>
+                        <span class="chip" :class="site.enabled ? 'chip-success' : 'chip-warn'" x-text="site.enabled ? 'Active' : 'Disabled'"></span>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td class="table-strong">Total</td>
+                    <td class="table-mono" x-text="formatNumber(siteSummary.total_requests)"></td>
+                    <td class="table-mono">-</td>
+                    <td class="table-mono" x-text="formatBytes(siteSummary.total_bandwidth_bytes)"></td>
+                    <td class="table-mono">-</td>
+                    <td>-</td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           </section>
         </template>
@@ -577,9 +639,12 @@
         <!-- Operating Systems & Browsers -->
         <template x-if="activeView === 'live'">
           <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div class="panel">
+            <div class="panel" x-init="$watch('operatingSystems', () => renderOsChart())">
               <div class="panel-header">
                 <h2 class="panel-title">Operating Systems</h2>
+              </div>
+              <div class="chart-donut-container" x-show="operatingSystems.length > 0">
+                <canvas id="osChart"></canvas>
               </div>
               <div class="table-wrapper">
                 <table class="data-table">
@@ -608,9 +673,12 @@
               </div>
             </div>
 
-            <div class="panel">
+            <div class="panel" x-init="$watch('browsers', () => renderBrowserChart())">
               <div class="panel-header">
                 <h2 class="panel-title">Browsers</h2>
+              </div>
+              <div class="chart-donut-container" x-show="browsers.length > 0">
+                <canvas id="browserChart"></canvas>
               </div>
               <div class="table-wrapper">
                 <table class="data-table">
@@ -951,10 +1019,15 @@
           recentRequests: [],
           selectedRequest: null,
           allHosts: [],
+          siteSummary: null,
           monthlyHistory: { months: [], totals: {} },
           monthlyMaxHits: 1,
           dailyHistory: { days: [], totals: {}, average: {} },
           dailyMaxHits: 1,
+          monthlyChart: null,
+          dailyChart: null,
+          osChart: null,
+          browserChart: null,
           selectedHost: '',
           viewMode: 'month',
           activeView: 'live',
@@ -1056,12 +1129,13 @@
               this.loadOS(),
               this.loadRobots(),
               this.loadReferrers(),
-              this.loadRecentRequests()
+              this.loadRecentRequests(),
+              this.loadSiteSummary()
             ]);
           },
 
           async refreshArchive() {
-            await this.loadSummary();
+            await Promise.all([this.loadSummary(), this.loadSiteSummary()]);
             if (this.viewMode === 'month') {
               await Promise.all([this.loadMonthlyHistory(), this.loadDailyHistory()]);
             } else {
@@ -1186,6 +1260,13 @@
             const data = await this.fetchApi(`/api/stats/recent?${params.toString()}`, 'Failed to load recent requests');
             if (data) {
               this.recentRequests = data || [];
+            }
+          },
+
+          async loadSiteSummary() {
+            const data = await this.fetchApi('/api/sites', 'Failed to load sites');
+            if (data) {
+              this.siteSummary = data;
             }
           },
 
@@ -1399,6 +1480,348 @@
             if (status >= 400 && status < 500) return 'chip-warn';
             if (status >= 500) return 'chip-critical';
             return '';
+          },
+
+          // Chart.js configuration helpers
+          getChartColors() {
+            const style = getComputedStyle(document.documentElement);
+            return {
+              primary: style.getPropertyValue('--accent-primary').trim() || '#3b82f6',
+              info: style.getPropertyValue('--accent-info').trim() || '#06b6d4',
+              success: style.getPropertyValue('--accent-success').trim() || '#22c55e',
+              warning: style.getPropertyValue('--accent-warning').trim() || '#f59e0b',
+              danger: style.getPropertyValue('--accent-danger').trim() || '#ef4444',
+              textPrimary: style.getPropertyValue('--text-primary').trim() || '#fafafa',
+              textMuted: style.getPropertyValue('--text-muted').trim() || '#71717a',
+              borderSubtle: style.getPropertyValue('--border-subtle').trim() || 'rgba(255, 255, 255, 0.06)'
+            };
+          },
+
+          getChartDefaults() {
+            const colors = this.getChartColors();
+            return {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: false
+                },
+                tooltip: {
+                  backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                  titleColor: colors.textPrimary,
+                  bodyColor: colors.textPrimary,
+                  borderColor: colors.borderSubtle,
+                  borderWidth: 1,
+                  padding: 12,
+                  cornerRadius: 8
+                }
+              }
+            };
+          },
+
+          // Monthly trend line chart
+          renderMonthlyChart() {
+            const canvas = document.getElementById('monthlyChart');
+            if (!canvas || !this.monthlyHistory.months?.length) return;
+
+            const ctx = canvas.getContext('2d');
+            const colors = this.getChartColors();
+
+            if (this.monthlyChart) {
+              this.monthlyChart.destroy();
+            }
+
+            const labels = this.monthlyHistory.months.map(m => this.formatMonth(m.month_start));
+            const hitsData = this.monthlyHistory.months.map(m => m.hits || 0);
+            const visitorsData = this.monthlyHistory.months.map(m => m.unique_visitors || 0);
+
+            this.monthlyChart = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels,
+                datasets: [
+                  {
+                    label: 'Hits',
+                    data: hitsData,
+                    borderColor: colors.primary,
+                    backgroundColor: colors.primary + '20',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                  },
+                  {
+                    label: 'Visitors',
+                    data: visitorsData,
+                    borderColor: colors.info,
+                    backgroundColor: 'transparent',
+                    borderDash: [5, 5],
+                    tension: 0.3,
+                    pointRadius: 3,
+                    pointHoverRadius: 5
+                  }
+                ]
+              },
+              options: {
+                ...this.getChartDefaults(),
+                scales: {
+                  x: {
+                    grid: { color: colors.borderSubtle },
+                    ticks: { color: colors.textMuted }
+                  },
+                  y: {
+                    beginAtZero: true,
+                    grid: { color: colors.borderSubtle },
+                    ticks: {
+                      color: colors.textMuted,
+                      callback: (value) => this.formatNumber(value)
+                    }
+                  }
+                },
+                plugins: {
+                  ...this.getChartDefaults().plugins,
+                  legend: {
+                    display: true,
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                      color: colors.textMuted,
+                      usePointStyle: true,
+                      pointStyle: 'circle',
+                      padding: 16
+                    }
+                  },
+                  tooltip: {
+                    ...this.getChartDefaults().plugins.tooltip,
+                    callbacks: {
+                      label: (context) => `${context.dataset.label}: ${this.formatNumber(context.raw)}`
+                    }
+                  }
+                }
+              }
+            });
+          },
+
+          // Daily trend line chart
+          renderDailyChart() {
+            const canvas = document.getElementById('dailyChart');
+            if (!canvas || !this.dailyHistory.days?.length) return;
+
+            const ctx = canvas.getContext('2d');
+            const colors = this.getChartColors();
+
+            if (this.dailyChart) {
+              this.dailyChart.destroy();
+            }
+
+            const labels = this.dailyHistory.days.map(d => {
+              const dt = new Date(d.date);
+              return dt.getUTCDate().toString();
+            });
+            const hitsData = this.dailyHistory.days.map(d => d.hits || 0);
+            const visitsData = this.dailyHistory.days.map(d => d.visits || 0);
+
+            this.dailyChart = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels,
+                datasets: [
+                  {
+                    label: 'Hits',
+                    data: hitsData,
+                    borderColor: colors.warning,
+                    backgroundColor: colors.warning + '20',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 3,
+                    pointHoverRadius: 5
+                  },
+                  {
+                    label: 'Visits',
+                    data: visitsData,
+                    borderColor: colors.primary,
+                    backgroundColor: 'transparent',
+                    borderDash: [5, 5],
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                  }
+                ]
+              },
+              options: {
+                ...this.getChartDefaults(),
+                scales: {
+                  x: {
+                    grid: { color: colors.borderSubtle },
+                    ticks: { color: colors.textMuted }
+                  },
+                  y: {
+                    beginAtZero: true,
+                    grid: { color: colors.borderSubtle },
+                    ticks: {
+                      color: colors.textMuted,
+                      callback: (value) => this.formatNumber(value)
+                    }
+                  }
+                },
+                plugins: {
+                  ...this.getChartDefaults().plugins,
+                  legend: {
+                    display: true,
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                      color: colors.textMuted,
+                      usePointStyle: true,
+                      pointStyle: 'circle',
+                      padding: 16
+                    }
+                  },
+                  tooltip: {
+                    ...this.getChartDefaults().plugins.tooltip,
+                    callbacks: {
+                      label: (context) => `${context.dataset.label}: ${this.formatNumber(context.raw)}`
+                    }
+                  }
+                }
+              }
+            });
+          },
+
+          // OS distribution donut chart
+          renderOsChart() {
+            const canvas = document.getElementById('osChart');
+            if (!canvas || !this.operatingSystems?.length) return;
+
+            const ctx = canvas.getContext('2d');
+            const colors = this.getChartColors();
+
+            if (this.osChart) {
+              this.osChart.destroy();
+            }
+
+            const chartColors = [
+              colors.primary,
+              colors.info,
+              colors.success,
+              colors.warning,
+              colors.danger,
+              '#8b5cf6', // violet
+              '#ec4899', // pink
+              '#6366f1', // indigo
+            ];
+
+            const labels = this.operatingSystems.map(o => o.os);
+            const data = this.operatingSystems.map(o => o.hits);
+
+            this.osChart = new Chart(ctx, {
+              type: 'doughnut',
+              data: {
+                labels,
+                datasets: [{
+                  data,
+                  backgroundColor: chartColors.slice(0, labels.length),
+                  borderWidth: 0,
+                  hoverOffset: 4
+                }]
+              },
+              options: {
+                ...this.getChartDefaults(),
+                cutout: '65%',
+                plugins: {
+                  ...this.getChartDefaults().plugins,
+                  legend: {
+                    display: true,
+                    position: 'right',
+                    labels: {
+                      color: colors.textMuted,
+                      usePointStyle: true,
+                      pointStyle: 'circle',
+                      padding: 12,
+                      font: { size: 11 }
+                    }
+                  },
+                  tooltip: {
+                    ...this.getChartDefaults().plugins.tooltip,
+                    callbacks: {
+                      label: (context) => {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const pct = ((context.raw / total) * 100).toFixed(1);
+                        return `${context.label}: ${this.formatNumber(context.raw)} (${pct}%)`;
+                      }
+                    }
+                  }
+                }
+              }
+            });
+          },
+
+          // Browser distribution donut chart
+          renderBrowserChart() {
+            const canvas = document.getElementById('browserChart');
+            if (!canvas || !this.browsers?.length) return;
+
+            const ctx = canvas.getContext('2d');
+            const colors = this.getChartColors();
+
+            if (this.browserChart) {
+              this.browserChart.destroy();
+            }
+
+            const chartColors = [
+              colors.primary,
+              colors.info,
+              colors.success,
+              colors.warning,
+              colors.danger,
+              '#8b5cf6', // violet
+              '#ec4899', // pink
+              '#6366f1', // indigo
+            ];
+
+            const labels = this.browsers.map(b => b.browser);
+            const data = this.browsers.map(b => b.hits);
+
+            this.browserChart = new Chart(ctx, {
+              type: 'doughnut',
+              data: {
+                labels,
+                datasets: [{
+                  data,
+                  backgroundColor: chartColors.slice(0, labels.length),
+                  borderWidth: 0,
+                  hoverOffset: 4
+                }]
+              },
+              options: {
+                ...this.getChartDefaults(),
+                cutout: '65%',
+                plugins: {
+                  ...this.getChartDefaults().plugins,
+                  legend: {
+                    display: true,
+                    position: 'right',
+                    labels: {
+                      color: colors.textMuted,
+                      usePointStyle: true,
+                      pointStyle: 'circle',
+                      padding: 12,
+                      font: { size: 11 }
+                    }
+                  },
+                  tooltip: {
+                    ...this.getChartDefaults().plugins.tooltip,
+                    callbacks: {
+                      label: (context) => {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const pct = ((context.raw / total) * 100).toFixed(1);
+                        return `${context.label}: ${this.formatNumber(context.raw)} (${pct}%)`;
+                      }
+                    }
+                  }
+                }
+              }
+            });
           }
         };
       }

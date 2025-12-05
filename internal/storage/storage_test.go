@@ -360,6 +360,145 @@ func TestStorage_Cleanup(t *testing.T) {
 	}
 }
 
+func TestStorage_CleanupWithPerSiteRetention(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Create sites with different retention policies
+	enabled := true
+	_, err := s.CreateSite(ctx, SiteInput{
+		Host:          "short-retention.com",
+		RetentionDays: 3, // Keep only 3 days
+		Enabled:       &enabled,
+	})
+	if err != nil {
+		t.Fatalf("CreateSite() error = %v", err)
+	}
+
+	_, err = s.CreateSite(ctx, SiteInput{
+		Host:          "long-retention.com",
+		RetentionDays: 30, // Keep 30 days
+		Enabled:       &enabled,
+	})
+	if err != nil {
+		t.Fatalf("CreateSite() error = %v", err)
+	}
+
+	// Insert requests for different sites at different ages
+	requests := []RequestRecord{
+		// short-retention.com: 5 days old (should be deleted, > 3 days)
+		{Timestamp: now.AddDate(0, 0, -5), Host: "short-retention.com", Path: "/old", Status: 200, IP: "1.1.1.1"},
+		// short-retention.com: 2 days old (should be kept, < 3 days)
+		{Timestamp: now.AddDate(0, 0, -2), Host: "short-retention.com", Path: "/recent", Status: 200, IP: "1.1.1.1"},
+		// long-retention.com: 10 days old (should be kept, < 30 days)
+		{Timestamp: now.AddDate(0, 0, -10), Host: "long-retention.com", Path: "/kept", Status: 200, IP: "2.2.2.2"},
+		// long-retention.com: 35 days old (should be deleted, > 30 days)
+		{Timestamp: now.AddDate(0, 0, -35), Host: "long-retention.com", Path: "/deleted", Status: 200, IP: "2.2.2.2"},
+		// no-config.com: 10 days old (should be deleted by global 7-day retention)
+		{Timestamp: now.AddDate(0, 0, -10), Host: "no-config.com", Path: "/old-global", Status: 200, IP: "3.3.3.3"},
+		// no-config.com: 5 days old (should be kept, < global 7 days)
+		{Timestamp: now.AddDate(0, 0, -5), Host: "no-config.com", Path: "/recent-global", Status: 200, IP: "3.3.3.3"},
+	}
+
+	for _, req := range requests {
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Run cleanup with 7 days global default
+	result, err := s.CleanupWithPerSiteRetention(ctx, 7)
+	if err != nil {
+		t.Fatalf("CleanupWithPerSiteRetention() error = %v", err)
+	}
+
+	// Verify result statistics
+	if result.SitesProcessed != 2 {
+		t.Errorf("SitesProcessed = %d, want 2", result.SitesProcessed)
+	}
+	if result.TotalDeleted != 3 {
+		t.Errorf("TotalDeleted = %d, want 3", result.TotalDeleted)
+	}
+	if result.GlobalDeleted != 1 {
+		t.Errorf("GlobalDeleted = %d, want 1", result.GlobalDeleted)
+	}
+	if deleted, ok := result.PerSiteDeleted["short-retention.com"]; !ok || deleted != 1 {
+		t.Errorf("PerSiteDeleted[short-retention.com] = %d, want 1", deleted)
+	}
+	if deleted, ok := result.PerSiteDeleted["long-retention.com"]; !ok || deleted != 1 {
+		t.Errorf("PerSiteDeleted[long-retention.com] = %d, want 1", deleted)
+	}
+
+	// Verify remaining requests by counting directly from DB
+	var count int
+	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM requests WHERE host = ?", "short-retention.com").Scan(&count)
+	if err != nil {
+		t.Fatalf("count query error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("short-retention.com requests = %d, want 1", count)
+	}
+
+	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM requests WHERE host = ?", "long-retention.com").Scan(&count)
+	if err != nil {
+		t.Fatalf("count query error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("long-retention.com requests = %d, want 1", count)
+	}
+
+	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM requests WHERE host = ?", "no-config.com").Scan(&count)
+	if err != nil {
+		t.Fatalf("count query error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("no-config.com requests = %d, want 1", count)
+	}
+}
+
+func TestStorage_CleanupWithPerSiteRetention_NoCustomSites(t *testing.T) {
+	s, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert requests without any site configurations
+	requests := []RequestRecord{
+		{Timestamp: now.AddDate(0, 0, -10), Host: "example.com", Path: "/old", Status: 200, IP: "1.1.1.1"},
+		{Timestamp: now.AddDate(0, 0, -5), Host: "example.com", Path: "/recent", Status: 200, IP: "1.1.1.1"},
+	}
+
+	for _, req := range requests {
+		if err := s.InsertRequest(ctx, req); err != nil {
+			t.Fatalf("InsertRequest() error = %v", err)
+		}
+	}
+
+	// Run cleanup with 7 days global default
+	result, err := s.CleanupWithPerSiteRetention(ctx, 7)
+	if err != nil {
+		t.Fatalf("CleanupWithPerSiteRetention() error = %v", err)
+	}
+
+	// Should use global retention for all
+	if result.SitesProcessed != 0 {
+		t.Errorf("SitesProcessed = %d, want 0", result.SitesProcessed)
+	}
+	if result.TotalDeleted != 1 {
+		t.Errorf("TotalDeleted = %d, want 1", result.TotalDeleted)
+	}
+	if result.GlobalDeleted != 1 {
+		t.Errorf("GlobalDeleted = %d, want 1", result.GlobalDeleted)
+	}
+	if len(result.PerSiteDeleted) != 0 {
+		t.Errorf("PerSiteDeleted = %v, want empty", result.PerSiteDeleted)
+	}
+}
+
 func TestStorage_RecentRequests_Limit(t *testing.T) {
 	s, cleanup := setupTestDB(t)
 	defer cleanup()

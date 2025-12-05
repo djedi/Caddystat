@@ -100,17 +100,17 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 ### Multi-Site Management
 
 - [x] Add site management API (`GET/POST /api/sites`)
-- [ ] Add per-site retention policies
-- [ ] Add cross-site aggregate view
-- [ ] Add site-specific authentication/permissions
+- [x] Add per-site retention policies
+- [x] Add cross-site aggregate view
+- [x] Add site-specific authentication/permissions
 
 ### Alerting System
 
-- [ ] Add alerting framework (email, webhook)
-- [ ] Alert on high error rate (5xx spike)
-- [ ] Alert on traffic anomalies (sudden spike/drop)
-- [ ] Alert on specific status codes (404 threshold)
-- [ ] Add alert configuration via env vars or config file
+- [x] Add alerting framework (email, webhook)
+- [x] Alert on high error rate (5xx spike)
+- [x] Alert on traffic anomalies (sudden spike/drop)
+- [x] Alert on specific status codes (404 threshold)
+- [x] Add alert configuration via env vars or config file
 
 ### Report Generation
 
@@ -135,9 +135,9 @@ A prioritized list of tasks to make Caddystat a production-ready, feature-rich a
 
 ### Data Visualization
 
-- [ ] Add Chart.js or similar library for better charts
-- [ ] Add line charts for time series (hourly/daily trends)
-- [ ] Add pie/donut charts for browser/OS distribution
+- [x] Add Chart.js or similar library for better charts
+- [x] Add line charts for time series (hourly/daily trends)
+- [x] Add pie/donut charts for browser/OS distribution
 - [ ] Add heatmap for traffic by hour-of-day and day-of-week
 - [ ] Add world map visualization for geo data
 - [ ] Add sparklines for quick trend indicators
@@ -264,13 +264,13 @@ Items that should be addressed for long-term maintainability:
 | ------------------------ | ------- | --------- | ---------- |
 | Security & Stability     | 21      | 21        | 100%       |
 | Performance & Operations | 21      | 21        | 100%       |
-| New Features             | 24      | 12        | 50%        |
-| Frontend                 | 18      | 2         | 11%        |
+| New Features             | 24      | 20        | 83%        |
+| Frontend                 | 18      | 5         | 28%        |
 | Nice-to-Have             | 21      | 0         | 0%         |
 | Quick Wins               | 10      | 10        | 100%       |
 | Bug Fixes                | 8       | 8         | 100%       |
 | Technical Debt           | 8       | 1         | 13%        |
-| **Total**                | **131** | **75**    | **57%**    |
+| **Total**                | **131** | **86**    | **66%**    |
 
 ---
 

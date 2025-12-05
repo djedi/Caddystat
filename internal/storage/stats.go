@@ -344,3 +344,96 @@ SELECT country, region, city, COUNT(*) FROM requests WHERE ts >= ? AND host = ? 
 	}
 	return out, rows.Err()
 }
+
+// AlertStats holds statistics needed for alert evaluation.
+type AlertStats struct {
+	TotalRequests    int64
+	Status5xx        int64
+	Status4xx        int64
+	StatusCounts     map[int]int64 // Per status code counts
+	AvgRequestsPerHr float64
+	PrevRequests     int64 // Requests in previous period (for comparison)
+}
+
+// GetAlertStats returns statistics needed for alert evaluation.
+func (s *Storage) GetAlertStats(ctx context.Context, duration time.Duration, host string) (*AlertStats, error) {
+	stats := &AlertStats{
+		StatusCounts: make(map[int]int64),
+	}
+
+	now := time.Now()
+	from := now.Add(-duration)
+	prevFrom := from.Add(-duration) // Previous period of same duration
+
+	// Get current period stats
+	args := []any{from}
+	where := "WHERE ts >= ?"
+	if host != "" {
+		where += " AND host = ?"
+		args = append(args, host)
+	}
+
+	query := fmt.Sprintf(`
+SELECT
+	COUNT(*) as total,
+	SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END) as status_5xx,
+	SUM(CASE WHEN status >= 400 AND status < 500 THEN 1 ELSE 0 END) as status_4xx
+FROM requests %s
+`, where)
+
+	row := s.db.QueryRowContext(ctx, query, args...)
+	if err := row.Scan(&stats.TotalRequests, &stats.Status5xx, &stats.Status4xx); err != nil {
+		return nil, err
+	}
+
+	// Get previous period request count for comparison
+	prevArgs := []any{prevFrom, from}
+	prevWhere := "WHERE ts >= ? AND ts < ?"
+	if host != "" {
+		prevWhere += " AND host = ?"
+		prevArgs = append(prevArgs, host)
+	}
+
+	prevQuery := fmt.Sprintf(`SELECT COUNT(*) FROM requests %s`, prevWhere)
+	row = s.db.QueryRowContext(ctx, prevQuery, prevArgs...)
+	if err := row.Scan(&stats.PrevRequests); err != nil {
+		return nil, err
+	}
+
+	// Get status code counts
+	statusArgs := []any{from}
+	statusWhere := "WHERE ts >= ?"
+	if host != "" {
+		statusWhere += " AND host = ?"
+		statusArgs = append(statusArgs, host)
+	}
+
+	statusQuery := fmt.Sprintf(`
+SELECT status, COUNT(*) as cnt
+FROM requests %s
+GROUP BY status
+`, statusWhere)
+
+	rows, err := s.db.QueryContext(ctx, statusQuery, statusArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status int
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		stats.StatusCounts[status] = count
+	}
+
+	// Calculate average requests per hour
+	hours := duration.Hours()
+	if hours > 0 {
+		stats.AvgRequestsPerHr = float64(stats.TotalRequests) / hours
+	}
+
+	return stats, rows.Err()
+}

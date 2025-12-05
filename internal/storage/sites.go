@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -39,7 +40,22 @@ type SiteSummary struct {
 	Sites          []Site `json:"sites"`
 }
 
-// migrateSites creates the sites table if it doesn't exist.
+// SitePermission represents a session's permission for a specific site.
+type SitePermission struct {
+	ID           int64     `json:"id"`
+	SessionToken string    `json:"session_token"`
+	SiteHost     string    `json:"site_host"` // "*" means all sites
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// SessionPermissions represents the permissions granted to a session.
+type SessionPermissions struct {
+	SessionToken string   `json:"session_token"`
+	AllSites     bool     `json:"all_sites"`     // true if user has access to all sites
+	AllowedHosts []string `json:"allowed_hosts"` // list of specific hosts (empty if AllSites is true)
+}
+
+// migrateSites creates the sites and site_permissions tables if they don't exist.
 // Called from the main migrate function.
 func (s *Storage) migrateSites() error {
 	schema := `
@@ -54,6 +70,17 @@ CREATE TABLE IF NOT EXISTS sites (
 );
 CREATE INDEX IF NOT EXISTS idx_sites_host ON sites(host);
 CREATE INDEX IF NOT EXISTS idx_sites_enabled ON sites(enabled);
+
+CREATE TABLE IF NOT EXISTS site_permissions (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_token TEXT NOT NULL,
+	site_host TEXT NOT NULL,
+	created_at TIMESTAMP NOT NULL,
+	FOREIGN KEY (session_token) REFERENCES sessions(token) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_site_permissions_token ON site_permissions(session_token);
+CREATE INDEX IF NOT EXISTS idx_site_permissions_host ON site_permissions(site_host);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_site_permissions_unique ON site_permissions(session_token, site_host);
 `
 	_, err := s.db.Exec(schema)
 	return err
@@ -387,4 +414,149 @@ func (s *Storage) IsSiteEnabled(ctx context.Context, host string) (bool, error) 
 		return false, fmt.Errorf("query enabled: %w", err)
 	}
 	return enabled, nil
+}
+
+// SetSessionPermissions sets the site permissions for a session.
+// Pass nil or empty slice for allSites access, or specific hosts for restricted access.
+// If allowedHosts contains "*", the session gets access to all sites.
+func (s *Storage) SetSessionPermissions(ctx context.Context, sessionToken string, allowedHosts []string) error {
+	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
+	defer cancel()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	// Start transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete existing permissions for this session
+	_, err = tx.ExecContext(ctx, `DELETE FROM site_permissions WHERE session_token = ?`, sessionToken)
+	if err != nil {
+		return fmt.Errorf("delete existing permissions: %w", err)
+	}
+
+	// If no hosts specified or empty, grant all sites access
+	if len(allowedHosts) == 0 {
+		allowedHosts = []string{"*"}
+	}
+
+	// Insert new permissions
+	now := time.Now()
+	for _, host := range allowedHosts {
+		host = strings.TrimSpace(host)
+		if host == "" {
+			continue
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO site_permissions (session_token, site_host, created_at)
+			VALUES (?, ?, ?)
+		`, sessionToken, host, now)
+		if err != nil {
+			return fmt.Errorf("insert permission: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetSessionPermissions returns the site permissions for a session.
+func (s *Storage) GetSessionPermissions(ctx context.Context, sessionToken string) (*SessionPermissions, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
+	defer cancel()
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT site_host FROM site_permissions WHERE session_token = ?
+	`, sessionToken)
+	if err != nil {
+		return nil, fmt.Errorf("query permissions: %w", err)
+	}
+	defer rows.Close()
+
+	perms := &SessionPermissions{
+		SessionToken: sessionToken,
+		AllowedHosts: make([]string, 0),
+	}
+
+	for rows.Next() {
+		var host string
+		if err := rows.Scan(&host); err != nil {
+			return nil, fmt.Errorf("scan permission: %w", err)
+		}
+		if host == "*" {
+			perms.AllSites = true
+			perms.AllowedHosts = nil // Clear hosts when all sites is granted
+			break
+		}
+		perms.AllowedHosts = append(perms.AllowedHosts, host)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate permissions: %w", err)
+	}
+
+	// If no permissions found, default to all sites for backward compatibility
+	// (existing sessions without explicit permissions get full access)
+	if !perms.AllSites && len(perms.AllowedHosts) == 0 {
+		perms.AllSites = true
+	}
+
+	return perms, nil
+}
+
+// HasSitePermission checks if a session has permission to access a specific site/host.
+// Returns true if the session has access to all sites or the specific host.
+func (s *Storage) HasSitePermission(ctx context.Context, sessionToken string, host string) (bool, error) {
+	perms, err := s.GetSessionPermissions(ctx, sessionToken)
+	if err != nil {
+		return false, err
+	}
+
+	if perms.AllSites {
+		return true, nil
+	}
+
+	for _, allowedHost := range perms.AllowedHosts {
+		if strings.EqualFold(allowedHost, host) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// DeleteSessionPermissions deletes all permissions for a session.
+func (s *Storage) DeleteSessionPermissions(ctx context.Context, sessionToken string) error {
+	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
+	defer cancel()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	_, err := s.db.ExecContext(ctx, `DELETE FROM site_permissions WHERE session_token = ?`, sessionToken)
+	if err != nil {
+		return fmt.Errorf("delete permissions: %w", err)
+	}
+	return nil
+}
+
+// CleanupOrphanedPermissions removes permissions for sessions that no longer exist.
+func (s *Storage) CleanupOrphanedPermissions(ctx context.Context) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
+	defer cancel()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM site_permissions
+		WHERE session_token NOT IN (SELECT token FROM sessions)
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup orphaned permissions: %w", err)
+	}
+	return result.RowsAffected()
 }

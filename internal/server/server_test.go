@@ -826,3 +826,249 @@ func TestSessionsEndpoint_WithFilters(t *testing.T) {
 		t.Errorf("expected TotalSessions = 0, got %d", resp.TotalSessions)
 	}
 }
+
+func setupTestServerWithAuthAndStore(t *testing.T, username, password string) (*Server, *storage.Storage, func()) {
+	t.Helper()
+	tmpDir, err := os.MkdirTemp("", "caddystat-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := storage.New(dbPath)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	hub := sse.NewHub()
+	cfg := config.Config{
+		ListenAddr:   ":8404",
+		DBPath:       dbPath,
+		AuthUsername: username,
+		AuthPassword: password,
+	}
+	srv := New(store, hub, cfg, nil)
+
+	cleanup := func() {
+		store.Close()
+		os.RemoveAll(tmpDir)
+	}
+
+	return srv, store, cleanup
+}
+
+func TestSitePermission_AllowedHost(t *testing.T) {
+	srv, store, cleanup := setupTestServerWithAuthAndStore(t, "admin", "secret")
+	defer cleanup()
+
+	// Login and get session with specific site permission
+	initReq := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	csrfCookie := initW.Result().Cookies()[0]
+
+	body := strings.NewReader(`{"username": "admin", "password": "secret", "allowed_sites": ["allowed.com"]}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.AddCookie(csrfCookie)
+	loginReq.Header.Set("X-CSRF-Token", csrfCookie.Value)
+	loginW := httptest.NewRecorder()
+
+	srv.ServeHTTP(loginW, loginReq)
+
+	if loginW.Code != http.StatusOK {
+		t.Fatalf("login failed: expected %d, got %d", http.StatusOK, loginW.Code)
+	}
+
+	// Get session cookie
+	sessionCookie := getSessionCookie(loginW.Result().Cookies())
+	if sessionCookie == nil {
+		t.Fatal("session cookie not set")
+	}
+
+	// Verify permissions in DB
+	perms, err := store.GetSessionPermissions(initReq.Context(), sessionCookie.Value)
+	if err != nil {
+		t.Fatalf("GetSessionPermissions error: %v", err)
+	}
+	if perms.AllSites {
+		t.Error("session should not have AllSites permission")
+	}
+	if len(perms.AllowedHosts) != 1 || perms.AllowedHosts[0] != "allowed.com" {
+		t.Errorf("expected allowed hosts [allowed.com], got %v", perms.AllowedHosts)
+	}
+
+	// Test accessing non-allowed host - should be blocked by permission middleware
+	req2 := httptest.NewRequest(http.MethodGet, "/api/stats/summary?host=notallowed.com", nil)
+	req2.AddCookie(sessionCookie)
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusForbidden {
+		t.Errorf("accessing non-allowed host: expected %d, got %d", http.StatusForbidden, w2.Code)
+	}
+
+	// Check JSON error code
+	var errResp APIError
+	if err := json.NewDecoder(w2.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp.Code != "SITE_ACCESS_DENIED" {
+		t.Errorf("expected code 'SITE_ACCESS_DENIED', got %q", errResp.Code)
+	}
+}
+
+func TestSitePermission_AllSitesDefault(t *testing.T) {
+	srv, store, cleanup := setupTestServerWithAuthAndStore(t, "admin", "secret")
+	defer cleanup()
+
+	// Login without specifying allowed_sites (should default to all)
+	initReq := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	csrfCookie := initW.Result().Cookies()[0]
+
+	body := strings.NewReader(`{"username": "admin", "password": "secret"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.AddCookie(csrfCookie)
+	loginReq.Header.Set("X-CSRF-Token", csrfCookie.Value)
+	loginW := httptest.NewRecorder()
+
+	srv.ServeHTTP(loginW, loginReq)
+
+	if loginW.Code != http.StatusOK {
+		t.Fatalf("login failed: expected %d, got %d", http.StatusOK, loginW.Code)
+	}
+
+	// Get session cookie
+	sessionCookie := getSessionCookie(loginW.Result().Cookies())
+	if sessionCookie == nil {
+		t.Fatal("session cookie not set")
+	}
+
+	// Verify permissions in DB
+	perms, err := store.GetSessionPermissions(initReq.Context(), sessionCookie.Value)
+	if err != nil {
+		t.Fatalf("GetSessionPermissions error: %v", err)
+	}
+	if !perms.AllSites {
+		t.Error("session without allowed_sites should have AllSites permission")
+	}
+
+	// Test that the middleware passes for any host with AllSites permission
+	// We test with /api/stats/status which doesn't have DB dependency issues
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/status", nil)
+	req.AddCookie(sessionCookie)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("accessing status with AllSites: expected %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestSitePermission_NoHostFilter(t *testing.T) {
+	srv, _, cleanup := setupTestServerWithAuthAndStore(t, "admin", "secret")
+	defer cleanup()
+
+	// Login with specific site permission
+	initReq := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	csrfCookie := initW.Result().Cookies()[0]
+
+	body := strings.NewReader(`{"username": "admin", "password": "secret", "allowed_sites": ["allowed.com"]}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.AddCookie(csrfCookie)
+	loginReq.Header.Set("X-CSRF-Token", csrfCookie.Value)
+	loginW := httptest.NewRecorder()
+
+	srv.ServeHTTP(loginW, loginReq)
+
+	sessionCookie := getSessionCookie(loginW.Result().Cookies())
+	if sessionCookie == nil {
+		t.Fatal("session cookie not set")
+	}
+
+	// Test accessing without host filter (aggregate view should be allowed)
+	// Use /api/stats/status which works on empty DB
+	req := httptest.NewRequest(http.MethodGet, "/api/stats/status", nil)
+	req.AddCookie(sessionCookie)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("accessing without host filter: expected %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestAuthCheckIncludesPermissions(t *testing.T) {
+	srv, _, cleanup := setupTestServerWithAuthAndStore(t, "admin", "secret")
+	defer cleanup()
+
+	// Login with specific site permission
+	initReq := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	initW := httptest.NewRecorder()
+	srv.ServeHTTP(initW, initReq)
+	csrfCookie := initW.Result().Cookies()[0]
+
+	body := strings.NewReader(`{"username": "admin", "password": "secret", "allowed_sites": ["site1.com", "site2.com"]}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.AddCookie(csrfCookie)
+	loginReq.Header.Set("X-CSRF-Token", csrfCookie.Value)
+	loginW := httptest.NewRecorder()
+
+	srv.ServeHTTP(loginW, loginReq)
+
+	sessionCookie := getSessionCookie(loginW.Result().Cookies())
+	if sessionCookie == nil {
+		t.Fatal("session cookie not set")
+	}
+
+	// Check auth status includes permissions
+	checkReq := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	checkReq.AddCookie(sessionCookie)
+	checkW := httptest.NewRecorder()
+	srv.ServeHTTP(checkW, checkReq)
+
+	if checkW.Code != http.StatusOK {
+		t.Fatalf("auth check failed: expected %d, got %d", http.StatusOK, checkW.Code)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(checkW.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["authenticated"] != true {
+		t.Error("expected authenticated=true")
+	}
+	if resp["auth_required"] != true {
+		t.Error("expected auth_required=true")
+	}
+
+	perms, ok := resp["permissions"].(map[string]any)
+	if !ok {
+		t.Fatal("expected permissions in response")
+	}
+	if perms["all_sites"] != false {
+		t.Error("expected all_sites=false")
+	}
+	allowedHosts, ok := perms["allowed_hosts"].([]any)
+	if !ok || len(allowedHosts) != 2 {
+		t.Errorf("expected 2 allowed hosts, got %v", allowedHosts)
+	}
+}
+
+func getSessionCookie(cookies []*http.Cookie) *http.Cookie {
+	for _, c := range cookies {
+		if c.Name == "caddystat_session" {
+			return c
+		}
+	}
+	return nil
+}

@@ -94,6 +94,105 @@ DELETE FROM requests WHERE ts < datetime('now', ?)
 	return err
 }
 
+// CleanupResult holds statistics from a cleanup operation.
+type CleanupResult struct {
+	GlobalDeleted   int64            // Requests deleted using global retention
+	PerSiteDeleted  map[string]int64 // Requests deleted per site with custom retention
+	TotalDeleted    int64            // Total requests deleted
+	SitesProcessed  int              // Number of sites with custom retention processed
+}
+
+// CleanupWithPerSiteRetention deletes old requests respecting per-site retention policies.
+// Sites with a custom retention_days > 0 use their configured value.
+// All other requests use the global defaultRetentionDays.
+func (s *Storage) CleanupWithPerSiteRetention(ctx context.Context, defaultRetentionDays int) (*CleanupResult, error) {
+	result := &CleanupResult{
+		PerSiteDeleted: make(map[string]int64),
+	}
+
+	// Get all sites with custom retention policies
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT host, retention_days
+		FROM sites
+		WHERE retention_days > 0
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query site retentions: %w", err)
+	}
+	defer rows.Close()
+
+	type siteRetention struct {
+		host          string
+		retentionDays int
+	}
+	var customSites []siteRetention
+	for rows.Next() {
+		var sr siteRetention
+		if err := rows.Scan(&sr.host, &sr.retentionDays); err != nil {
+			return nil, fmt.Errorf("scan site retention: %w", err)
+		}
+		customSites = append(customSites, sr)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate site retentions: %w", err)
+	}
+
+	result.SitesProcessed = len(customSites)
+
+	// Delete requests for sites with custom retention
+	for _, sr := range customSites {
+		res, err := s.db.ExecContext(ctx, `
+			DELETE FROM requests
+			WHERE host = ? AND ts < datetime('now', ?)
+		`, sr.host, fmt.Sprintf("-%d days", sr.retentionDays))
+		if err != nil {
+			return nil, fmt.Errorf("cleanup site %s: %w", sr.host, err)
+		}
+		deleted, _ := res.RowsAffected()
+		if deleted > 0 {
+			result.PerSiteDeleted[sr.host] = deleted
+			result.TotalDeleted += deleted
+		}
+	}
+
+	// Build list of hosts with custom retention to exclude from global cleanup
+	var excludeHosts []string
+	for _, sr := range customSites {
+		excludeHosts = append(excludeHosts, sr.host)
+	}
+
+	// Delete requests for all other hosts using global retention
+	var globalRes sql.Result
+	if len(excludeHosts) == 0 {
+		// No custom sites, just use global retention for everything
+		globalRes, err = s.db.ExecContext(ctx, `
+			DELETE FROM requests WHERE ts < datetime('now', ?)
+		`, fmt.Sprintf("-%d days", defaultRetentionDays))
+	} else {
+		// Exclude hosts with custom retention from global cleanup
+		query := `DELETE FROM requests WHERE ts < datetime('now', ?) AND host NOT IN (`
+		args := []any{fmt.Sprintf("-%d days", defaultRetentionDays)}
+		for i, host := range excludeHosts {
+			if i > 0 {
+				query += ","
+			}
+			query += "?"
+			args = append(args, host)
+		}
+		query += ")"
+		globalRes, err = s.db.ExecContext(ctx, query, args...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cleanup global: %w", err)
+	}
+
+	globalDeleted, _ := globalRes.RowsAffected()
+	result.GlobalDeleted = globalDeleted
+	result.TotalDeleted += globalDeleted
+
+	return result, nil
+}
+
 // Vacuum runs SQLite VACUUM to reclaim space and defragment the database.
 // This is useful to run after bulk deletes (like data retention cleanup).
 // Returns the bytes freed (approximate, based on file size before/after).
